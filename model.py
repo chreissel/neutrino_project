@@ -3,18 +3,9 @@ import torch.nn as nn
 dropout_fn = nn.Dropout2d
 import lightning as L
 
-# --- Definition of S4D model: get columns, shapes, and total rows ---
-class LitS4Model(L.LightningModule, **kwargs):
+class LitS4Model(L.LightningModule):
 
-    def __init__(
-        self,
-        d_input,
-        d_output=10,
-        d_model=256,
-        n_layers=4,
-        dropout=0.2,
-        prenorm=False,
-    ):
+    def __init__(self,d_input,d_output=10,d_model=256,n_layers=4,dropout=0.2,prenorm=False):
         super().__init__()
         self.prenorm = prenorm
         self.encoder = nn.Linear(d_input, d_model)
@@ -30,6 +21,8 @@ class LitS4Model(L.LightningModule, **kwargs):
             self.dropouts.append(dropout_fn(dropout))
         # Linear decoder
         self.decoder = nn.Linear(d_model, d_output)
+
+        self.criterion = nn.MSELoss()
 
     def forward(self, x):
         """
@@ -67,7 +60,7 @@ class LitS4Model(L.LightningModule, **kwargs):
     def training_step(self, batch, batch_idx, log=True):
         X, y = batch
         y_hat = self.forward(X)
-        loss = nn.MSELoss(y_hat, y)
+        loss = self.criterion(y_hat, y)
 
         if log:
             self.log("train/loss",
@@ -83,7 +76,7 @@ class LitS4Model(L.LightningModule, **kwargs):
     def validation_step(self, batch, batch_idx, log=True):
         X, y = batch
         y_hat = self.forward(X)
-        loss = nn.MSELoss(y_hat, y)
+        loss = self.criterion(y_hat, y)
 
         if log:
             self.log("val/loss",

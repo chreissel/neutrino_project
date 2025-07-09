@@ -1,6 +1,8 @@
 import lightning as L
 from torch.utils.data import random_split, DataLoader, Dataset
 import h5py
+import numpy as np
+import torch
 
 class Project8Sim(Dataset):
     def __init__(self, inputs, variables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5', cutoff=4000, norm=True):
@@ -50,7 +52,7 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5', norm=True):
+    def __init__(self, inputs, variables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5', norm=True, **kwargs):
         super().__init__(**kwargs)
        
         dataset = Project8Sim(inputs, variables, path, cutoff, norm) 

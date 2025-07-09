@@ -1,0 +1,46 @@
+trainer:
+  accelerator: auto
+  default_root_dir: runs/test/
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        patience: 5
+        mode: min
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+  log_every_n_steps: 1
+  max_epochs: 5
+
+data:
+  class_path: data.LitDataModule
+  init_args:
+        inputs: ['output_ts_Q', 'output_ts_I']
+        variables: ['energy_eV', 'radius_m']
+        batch_size: 32
+        num_workers: 4
+
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 1e-2
+
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.ExponentialLR
+  init_args:
+    gamma: 0.99
+
+model:
+  class_path: model.LitS4Model
+  init_args:
+    d_input: 2
+    d_output: 2
+    d_model: 6
+    n_layers: 4
+    dropout: 0.0
+    prenorm: False

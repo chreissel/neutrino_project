@@ -1,49 +1,53 @@
-import pickle
-import gzip
+import os
 import numpy as np
-from tqdm import tqdm
-from sklearn.preprocessing import normalize
+import pandas as pd
+import gzip, h5py
+import pickle
+import glob
 
-dirname = '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/'
-variable=['energy_eV', 'pitch_angle_deg', 'carrier_frequency_Hz', 'avg_axial_frequency_Hz', 'radius_m']
-length = 0.4e4
-nrepeat = 1
-norm = True
+file_list = glob.glob('/n/holystore01/LABS/iaifi_lab/Lab/hbinney/ssm_files/Project8Sims_noNoise_dataMode_100k/*.pkl.gz')
+hdf5_path = '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5'
 
-from os import listdir
-from os.path import isfile, join
-files = [f for f in listdir(dirname) if isfile(join(dirname, f))]
-files = [dirname + f for f in files]
-files = [f for f in files if '.pkl.gz' in f]
+if os.path.exists(hdf5_path):
+    os.remove(hdf5_path)
 
-for i,fname in enumerate(tqdm(files)):
-    with gzip.open(fname, "rb") as f:
-        data = pickle.load(f, encoding='bytes')
+# --- First pass: get columns, shapes, and total rows ---
+with gzip.open(file_list[0], 'rb') as f:
+    df = pickle.load(f)
+columns = df.columns
+shapes = {}
+for col in columns:
+    arr = df[col].to_numpy()
+    if isinstance(arr[0], (list, tuple, np.ndarray)):
+        arr0 = np.stack(arr)
+        shapes[col] = arr0.shape[1:]
+    else:
+        shapes[col] = ()
 
-    for j in range(nrepeat):
-        # preparation of two time series
-        x1 = data['output_ts_I']
-        x1 = np.stack(np.array(x1))
-        x2 = data['output_ts_Q']
-        x2 = np.stack(np.array(x2))
+total_rows = 0
+for fname in file_list:
+    with gzip.open(fname, 'rb') as f:
+        df = pickle.load(f)
+    total_rows += len(df)
 
-        X = np.stack([x1,x2], axis=-1)
-        X = X[:,int(length)*j:int(length)*(j+1),:]
+# --- Second pass: create datasets and fill them ---
+with h5py.File(hdf5_path, 'w') as h5f:
+    dsets = {}
+    for col in columns:
+        shape = (total_rows,) + shapes[col]
+        dsets[col] = h5f.create_dataset(col, shape=shape, dtype=np.float32)
+    row_idx = 0
+    for fname in file_list:
+        with gzip.open(fname, 'rb') as f:
+            df = pickle.load(f)
+        rows = len(df)
+        for col in columns:
+            arr = df[col].to_numpy()
+            if isinstance(arr[0], (list, tuple, np.ndarray)):
+                arr = np.stack(arr).astype(np.float32)
+            else:
+                arr = arr.astype(np.float32)
+            dsets[col][row_idx:row_idx+rows] = arr
+        row_idx += rows
 
-        # preparation of variables to be regressed
-        y = data[variable]
-        y = np.array(y)
-
-        if (i ==0) and (j==0):
-            Xfull = X
-            yfull = y
-        else:
-            Xfull = np.append(Xfull, X, axis=0)
-            yfull = np.append(yfull, y, axis=0)
-
-if norm:
-    mu_y = np.mean(yfull, axis=0)
-    stds_y = np.std(yfull, axis=0)
-    yfull = (yfull-mu_y)/stds_y
-
-np.savez('data.npz', X=Xfull, y=yfull, mu_y=mu_y, stds_y=stds_y)
+print(f'Saved all rows for each column as a single dataset in {hdf5_path}')
