@@ -5,12 +5,13 @@ import numpy as np
 import torch
 
 class Project8Sim(Dataset):
-    def __init__(self, inputs, variables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5', cutoff=4000, norm=True):
+    def __init__(self, inputs, variables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True):
 
         arr = {}
         with h5py.File(path, 'r') as f:
             for i in inputs+variables:
-                arr[i] = f[i][:100]
+                #arr[i] = f[i][:100]
+                arr[i] = f[i][:]
                 arr[i] = arr[i][:, np.newaxis]
         X = np.concatenate([arr[i] for i in inputs], axis = 1)
         X = np.swapaxes(X,1,2)[:,:cutoff, :]
@@ -52,12 +53,16 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5', norm=True, **kwargs):
+    def __init__(self, inputs, variables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, **kwargs):
         super().__init__(**kwargs)
        
-        dataset = Project8Sim(inputs, variables, path, cutoff, norm) 
+        dataset = Project8Sim(inputs, variables, path, cutoff, norm)
+        self.mu = dataset.mu
+        self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
         self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [0.8,0.1,0.1], generator=generator)
+
+        self.save_hyperparameters()
 
     def train_dataloader(self):
         loader = DataLoader(self.train_dataset,shuffle=True, **self.loader_kwargs)

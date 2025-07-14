@@ -5,8 +5,8 @@ import gzip, h5py
 import pickle
 import glob
 
-file_list = glob.glob('/n/holystore01/LABS/iaifi_lab/Lab/hbinney/ssm_files/Project8Sims_noNoise_dataMode_100k/*.pkl.gz')
-hdf5_path = '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data.hdf5'
+file_list = glob.glob('/n/holystore01/LABS/iaifi_lab/Lab/hbinney/ssm_files/Project8Sims_noNoise_dataMode_100k_newmetadata/*.pkl.gz')
+hdf5_path = '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5'
 
 if os.path.exists(hdf5_path):
     os.remove(hdf5_path)

@@ -2,10 +2,14 @@ from models.s4d import S4D
 import torch.nn as nn
 dropout_fn = nn.Dropout2d
 import lightning as L
+import numpy as np
+from plotting import make_bias,make_resolution
+from io import BytesIO
+import matplotlib.pyplot as plt
 
 class LitS4Model(L.LightningModule):
 
-    def __init__(self,d_input,d_output=10,d_model=256,n_layers=4,dropout=0.2,prenorm=False):
+    def __init__(self,d_input,variables,d_output=10,d_model=256,n_layers=4,dropout=0.2,prenorm=False):
         super().__init__()
         self.prenorm = prenorm
         self.encoder = nn.Linear(d_input, d_model)
@@ -23,6 +27,11 @@ class LitS4Model(L.LightningModule):
         self.decoder = nn.Linear(d_model, d_output)
 
         self.criterion = nn.MSELoss()
+        self.d_output = d_output
+        self.val_outputs = []
+        self.variables = variables
+
+        self.save_hyperparameters()
 
     def forward(self, x):
         """
@@ -57,6 +66,7 @@ class LitS4Model(L.LightningModule):
         scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
         return optimizer, scheduler
 
+
     def training_step(self, batch, batch_idx, log=True):
         X, y = batch
         y_hat = self.forward(X)
@@ -77,6 +87,8 @@ class LitS4Model(L.LightningModule):
         X, y = batch
         y_hat = self.forward(X)
         loss = self.criterion(y_hat, y)
+
+        #self.val_outputs.append((y.cpu().numpy(), y_hat.cpu().numpy()))
 
         if log:
             self.log("val/loss",

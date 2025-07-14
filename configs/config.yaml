@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: runs/test/
+  default_root_dir: runs/input_I__output_energy__d_model_6_n_layers_4/
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -15,15 +15,15 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 5
+  max_epochs: 80
 
 data:
   class_path: data.LitDataModule
   init_args:
-        inputs: ['output_ts_Q', 'output_ts_I']
-        variables: ['energy_eV', 'radius_m']
+        inputs: ['output_ts_I']
+        variables: ['energy_eV']
         batch_size: 32
-        num_workers: 4
+        num_workers: 1
 
 optimizer:
   class_path: torch.optim.AdamW
@@ -38,9 +38,10 @@ lr_scheduler:
 model:
   class_path: model.LitS4Model
   init_args:
-    d_input: 2
-    d_output: 2
+    d_input: 1
+    d_output: 1
     d_model: 6
     n_layers: 4
     dropout: 0.0
     prenorm: False
+    variables: ['energy_eV']
