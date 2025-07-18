@@ -7,12 +7,12 @@ my_viridis = cm.get_cmap("viridis", 1024).with_extremes(under="white")
 
 def make_bias(idx, var, true, pred):
 
-    label = var.split('_')[0]
-    unit = var.split('_')[1]
+    label = " ".join(var.split('_')[:-1])
+    unit = var.split('_')[-1]
 
     fig = plt.figure()
     #plt.scatter(true[:,idx-1],pred[:,idx-1])
-    heatmap, xedges, yedges = np.histogram2d(true[:,idx-1], pred[:,idx-1], bins=100)
+    heatmap, xedges, yedges = np.histogram2d(true[:,idx], pred[:,idx], bins=100)
     plt.imshow(heatmap.T, origin='lower', cmap=my_viridis, aspect='auto',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], vmin=1)
     plt.colorbar(label='Density')
     plt.xlabel('true ' + label + ' '+ '['+unit+']')
@@ -21,18 +21,22 @@ def make_bias(idx, var, true, pred):
 
 
 def make_resolution(idx, var, true, pred):
-    label = var.split('_')[0]
-    unit = var.split('_')[1]
+
+    label = " ".join(var.split('_')[:-1])
+    unit = var.split('_')[-1]
 
     nentries = true.shape[0]
-    data = true[:,idx-1]-pred[:,idx-1]
+    data = true[:,idx]-pred[:,idx]
+
+    mean = np.mean(data)
+    std = np.std(data)
 
     fig = plt.figure()
-    hist, bins, _ = plt.hist(data,bins=100,weights=np.ones(nentries)*1/float(nentries))
+    hist, bins, _ = plt.hist(data,bins=100,weights=np.ones(nentries)*1/float(nentries),range=(mean-3*std, mean+3*std))
     def gaussian(x, amplitude, mean, stddev):
         return amplitude * np.exp(-((x - mean) / stddev)**2 / 2)
     bin_centers = (bins[:-1] + bins[1:]) / 2
-    popt, pcov = curve_fit(gaussian, bin_centers, hist, p0=[max(hist), np.mean(data), np.std(data)])
+    popt, pcov = curve_fit(gaussian, bin_centers, hist, p0=[max(hist), mean, std])
     amplitude_fit, mean_fit, stddev_fit = popt
 
     x_fit = np.linspace(min(bins), max(bins), 100)
@@ -41,3 +45,4 @@ def make_resolution(idx, var, true, pred):
     plt.ylabel('A.U.')
     plt.legend()
     return fig
+
