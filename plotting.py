@@ -5,49 +5,92 @@ import numpy as np
 from matplotlib import cm
 my_viridis = cm.get_cmap("viridis", 1024).with_extremes(under="white")
 
-def make_bias(idx, var, true, pred):
+# General formatting
+SMALL_SIZE = 10
+MEDIUM_SIZE = 12
+BIG_SIZE = 14
 
-    label = " ".join(var.split('_')[:-1])
-    unit = var.split('_')[-1]
+plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIG_SIZE)  # fontsize of the figure title
 
-    fig = plt.figure()
-    #plt.scatter(true[:,idx-1],pred[:,idx-1])
-    heatmap, xedges, yedges = np.histogram2d(true[:,idx], pred[:,idx], bins=100)
-    plt.imshow(heatmap.T, origin='lower', cmap=my_viridis, aspect='auto',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], vmin=1)
-    plt.colorbar(label='Density')
-    plt.xlabel('true ' + label + ' '+ '['+unit+']')
-    plt.ylabel('predicted ' + label + ' ' +'['+unit+']')
-    return fig
-
-
-def make_resolution(idx, var, true, pred):
-
-    label = " ".join(var.split('_')[:-1])
-    unit = var.split('_')[-1]
-
-    nentries = true.shape[0]
-    data = true[:,idx]-pred[:,idx]
-
-    mean = np.mean(data)
-    std = np.std(data)
-
-    fig = plt.figure()
-    hist, bins, _ = plt.hist(data,bins=100,weights=np.ones(nentries)*1/float(nentries),range=(mean-3*std, mean+3*std))
-    def gaussian(x, amplitude, mean, stddev):
+def gaussian(x, amplitude, mean, stddev):
         return amplitude * np.exp(-((x - mean) / stddev)**2 / 2)
-    bin_centers = (bins[:-1] + bins[1:]) / 2
-    popt, pcov = curve_fit(gaussian, bin_centers, hist, p0=[max(hist), mean, std])
-    amplitude_fit, mean_fit, stddev_fit = popt
+    
+def get_label_unit(var):
+    # Generate useful values for plotting
+    # 
+    # INPUTS
+    #    var: the variable name from the original file (e.g., 'start_carrier_frequency_Hz')
+    #      Will probably come from model.variables
+    #
+    # OUTPUTS
+    #    label: axis label, without units
+    #    unit: plotted unit
+    #    diff_unit: unit for a plot of true-pred difference, which may be different than unit
+    #    factor: factor corresponding to the unit
+    #    diff_factor: factor corresponding to diff_unit
+    
+    # Interpret the variable name
+    splits = var.split('_')
+    label = ' '.join(splits[:-1])
+    unit = splits[-1]
+    diff_unit = splits[-1]
+    
+    factor = 1
+    diff_factor = 1
+    
+    # We usually display the carrier frequency in GHz and the resolution in kHz
+    if(var=='start_carrier_frequency_Hz'):
+        factor = 1E9
+        diff_factor = 1E3
+        unit = 'GHz'
+        diff_unit = 'kHz'
+        
+    # We usually display both the axial frequency and resolution in kHz
+    if(var=='avg_axial_frequency_Hz'):
+        factor = 1E3
+        diff_factor = 1E3
+        unit = 'kHz'
+        diff_unit = 'kHz'
+        
+    return label, unit, diff_unit, factor, diff_factor
 
-    x_fit = np.linspace(min(bins), max(bins), 100)
-    plt.plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
-    plt.xlabel('residual '+label+ ' '+'['+unit+']')
-    plt.ylabel('A.U.')
-    plt.legend()
+def make_bias(variables, true, pred):
+    # Plot the true parameter vs. the pred parameter
+    #
+    # INPUTS
+    #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
+    #    true: array of true values from the model
+    #    pred: array of predicted values from the model
+    #
+    # OUTPUTS
+    #    fig: figure with the plot
+    
+    # There will be one plot per variable
+    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4))
+    
+    # Loop over the variables
+    for vind, var in enumerate(variables):
+        
+        var_label, var_unit, _, factor, _ = get_label_unit(var)
+        
+        # Divide by factor to get the desired units
+        true_var = true[:, vind]/factor
+        pred_var = pred[:, vind]/factor
+        
+        ax[vind].hist2d(true_var, pred_var, bins=((np.linspace(min(true_var), max(true_var), 300), np.linspace(min(true_var), max(true_var), 300))), cmin=1)
+        ax[vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
+        ax[vind].set_ylabel('pred ' + var_label + ' ['+var_unit+']')
+        
+    plt.tight_layout()
+
     return fig
 
-<<<<<<< Updated upstream
-=======
 def make_res(variables, true, pred):
     # Extract the resolution using a Gaussian fit
     #
@@ -200,4 +243,3 @@ def make_all_plots(variables, true, pred):
         energy_res = make_energy_res(variables, true, pred)
         return res, bias, all_vs_all, energy_res
     res, bias, all_vs_all
->>>>>>> Stashed changes
