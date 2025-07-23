@@ -72,7 +72,7 @@ def make_bias(variables, true, pred):
     #    fig: figure with the plot
     
     # There will be one plot per variable
-    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4))
+    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
     
     # Loop over the variables
     for vind, var in enumerate(variables):
@@ -83,9 +83,9 @@ def make_bias(variables, true, pred):
         true_var = true[:, vind]/factor
         pred_var = pred[:, vind]/factor
         
-        ax[vind].hist2d(true_var, pred_var, bins=((np.linspace(min(true_var), max(true_var), 300), np.linspace(min(true_var), max(true_var), 300))), cmin=1)
-        ax[vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
-        ax[vind].set_ylabel('pred ' + var_label + ' ['+var_unit+']')
+        ax[0, vind].hist2d(true_var, pred_var, bins=((np.linspace(min(true_var), max(true_var), 300), np.linspace(min(true_var), max(true_var), 300))), cmin=1)
+        ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
+        ax[0, vind].set_ylabel('pred ' + var_label + ' ['+var_unit+']')
         
     plt.tight_layout()
 
@@ -103,11 +103,9 @@ def make_res(variables, true, pred):
     #    fig: figure with the plot
     
     # There will be one plot per variable
-    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4))
-    
+    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
     # Loop over the variables
     for vind, var in enumerate(variables):
-        
         var_label, var_unit, diff_unit, factor, diff_factor = get_label_unit(var)
         
         # Divide by factor to get the desired units
@@ -115,17 +113,17 @@ def make_res(variables, true, pred):
         pred_var = pred[:, vind]
         diff = (true_var-pred_var)/diff_factor
         
-        hist, bins, _ = ax[vind].hist(diff,bins=500,weights=np.ones(len(true_var))*1/float(len(true_var)))
+        hist, bins, _ = ax[0, vind].hist(diff,bins=500,weights=np.ones(len(true_var))*1/float(len(true_var)))
         bin_centers = (bins[:-1] + bins[1:]) / 2
         popt, pcov = curve_fit(gaussian, bin_centers, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
         amplitude_fit, mean_fit, stddev_fit = popt
 
         x_fit = np.linspace(min(bins), max(bins), 1000)
-        ax[vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
-        ax[vind].set_xlim(mean_fit-5*stddev_fit, mean_fit+5*stddev_fit)
-        ax[vind].set_xlabel('residual '+var_label+ ' '+'['+diff_unit+']')
-        ax[vind].set_ylabel('A.U.')
-        ax[vind].legend()
+        ax[0, vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
+        ax[0, vind].set_xlim(mean_fit-5*stddev_fit, mean_fit+5*stddev_fit)
+        ax[0, vind].set_xlabel('residual '+var_label+ ' '+'['+diff_unit+']')
+        ax[0, vind].set_ylabel('A.U.')
+        ax[0, vind].legend()
         
     plt.tight_layout()
     
@@ -144,7 +142,7 @@ def make_energy_res(variables, true, pred):
     #    fig: figure with the plot
 
     # There will be one plot per variable
-    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4))
+    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
     
     eind = variables.index('energy_eV')
     energy_diff = true[:, eind]-pred[:, eind]
@@ -169,15 +167,15 @@ def make_energy_res(variables, true, pred):
         stds = [np.std(energy_diff) for energy_diff in energy_diffs]
         
         # The error bars are the stddevs
-        ax[vind].errorbar(bincenters, means, stds, color='k', marker='o', ls='')
-        ax[vind].axhline(0, color='r', ls='--', lw='2')
+        ax[0, vind].errorbar(bincenters, means, stds, color='k', marker='o', ls='')
+        ax[0, vind].axhline(0, color='r', ls='--', lw='2')
         # This region corresponds to the desired resolution of 0.3 eV stddev
-        ax[vind].fill_between(var_bins, np.ones(len(var_bins))*-0.3, np.ones(len(var_bins))*0.3, alpha=0.5, label="0.3 eV std")
-        ax[vind].legend()
-        ax[vind].set_xlim(min(var_bins), max(var_bins))
-        ax[vind].set_ylim(-3,3)
-        ax[vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
-        ax[vind].set_ylabel('true-pred energy [eV]')
+        ax[0, vind].fill_between(var_bins, np.ones(len(var_bins))*-0.3, np.ones(len(var_bins))*0.3, alpha=0.5, label="0.3 eV std")
+        ax[0, vind].legend()
+        ax[0, vind].set_xlim(min(var_bins), max(var_bins))
+        ax[0, vind].set_ylim(-3,3)
+        ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
+        ax[0, vind].set_ylabel('true-pred energy [eV]')
         
     plt.tight_layout()
     
@@ -197,7 +195,7 @@ def make_all_vs_all(variables, true, pred):
     #    fig: figure with the plot
 
     # It will be a grid of size len(variables) x len(variables)
-    fig, ax = plt.subplots(len(variables), len(variables), figsize=((4*len(variables), 4*len(variables))))
+    fig, ax = plt.subplots(len(variables), len(variables), figsize=((4*len(variables), 4*len(variables))), squeeze=False)
     
     # Loop over the variables
     for vind, var in enumerate(variables):
