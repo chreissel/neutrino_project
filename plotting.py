@@ -60,6 +60,37 @@ def get_label_unit(var):
         
     return label, unit, diff_unit, factor, diff_factor
 
+def make_distribution(variables, true):
+    # Plot truth distribution of variables - this gives a sense of whether the underlying distribution of sims is even
+    #
+    # INPUTS
+    #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
+    #    true: array of true values from the model
+    #
+    # OUTPUTS
+    #    fig: figure with the plot
+    
+    # There will be one plot per variable
+    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
+    
+    # Loop over the variables
+    for vind, var in enumerate(variables):
+        
+        var_label, var_unit, _, factor, _ = get_label_unit(var)
+        
+        # Divide by factor to get the desired units
+        true_var = true[:, vind]/factor
+        
+        ax[0, vind].hist(true_var, bins=np.linspace(min(true_var), max(true_var), 100))
+        ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
+        ax[0, vind].set_ylabel('events')
+        ax[0, vind].set_xlim(min(true_var), max(true_var))
+        
+    plt.tight_layout()
+
+    return fig
+
+
 def make_bias(variables, true, pred):
     # Plot the true parameter vs. the pred parameter
     #
@@ -233,11 +264,12 @@ def make_all_plots(variables, true, pred):
     # OUTPUTS
     #    res, bias, all_vs_all, energy_res: figures to be saved later, if desired
     
+    dist = make_distribution(variables, true)
     res = make_res(variables, true, pred)
     bias = make_bias(variables, true, pred)
     all_vs_all = make_all_vs_all(variables, true, pred)
     # Only make the energy resolution plot if the energy variable is present
     if 'energy_eV' in variables:
         energy_res = make_energy_res(variables, true, pred)
-        return res, bias, all_vs_all, energy_res
-    res, bias, all_vs_all
+        return dist, res, bias, all_vs_all, energy_res
+    return dist, res, bias, all_vs_all
