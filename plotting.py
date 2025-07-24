@@ -81,10 +81,11 @@ def make_distribution(variables, true):
         # Divide by factor to get the desired units
         true_var = true[:, vind]/factor
         
-        ax[0, vind].hist(true_var, bins=np.linspace(min(true_var), max(true_var), 100))
+        ax[0, vind].hist(true_var, bins=np.linspace(min(true_var), max(true_var), 100), label='%d events'%len(true_var))
         ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
         ax[0, vind].set_ylabel('events')
         ax[0, vind].set_xlim(min(true_var), max(true_var))
+        ax[0, vind].legend()
         
     plt.tight_layout()
 
@@ -144,9 +145,9 @@ def make_res(variables, true, pred):
         pred_var = pred[:, vind]
         diff = (true_var-pred_var)/diff_factor
         
-        hist, bins, _ = ax[0, vind].hist(diff,bins=500,weights=np.ones(len(true_var))*1/float(len(true_var)))
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-        popt, pcov = curve_fit(gaussian, bin_centers, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
+        hist, bins, _ = ax[0, vind].hist(diff,bins=1000,weights=np.ones(len(true_var))*1/float(len(true_var)))
+        bincenters = (bins[:-1] + bins[1:]) / 2
+        popt, pcov = curve_fit(gaussian, bincenters, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
         amplitude_fit, mean_fit, stddev_fit = popt
 
         x_fit = np.linspace(min(bins), max(bins), 1000)
@@ -174,7 +175,7 @@ def make_energy_res(variables, true, pred):
 
     # There will be one plot per variable
     fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
-    
+
     eind = variables.index('energy_eV')
     energy_diff = true[:, eind]-pred[:, eind]
     
@@ -194,8 +195,25 @@ def make_energy_res(variables, true, pred):
         idxs_all = [np.where((true_var >= var_bins[i]) & (true_var <= var_bins[i+1])) for i in range(len(var_bins)-1)]
         # Find the energy differences corresponding to these bins, then take the mean and stddev
         energy_diffs = [np.squeeze(true[idxs, eind]-pred[idxs, eind]) for idxs in idxs_all] 
-        means = [np.mean(energy_diff) for energy_diff in energy_diffs]
-        stds = [np.std(energy_diff) for energy_diff in energy_diffs]
+        
+        means = []
+        stds = []
+        for energy_diff in energy_diffs:
+            hist, bins, _ = plt.hist(energy_diff,bins=100)
+            bincenters_g = (bins[:-1] + bins[1:]) / 2
+            popt, pcov = curve_fit(gaussian, bincenters_g, hist, p0=[max(hist), np.mean(energy_diff), np.std(energy_diff)])
+            amplitude_fit, mean_fit, stddev_fit = popt
+            means.append(mean_fit)
+            stds.append(stddev_fit)
+            x_fit = np.linspace(min(bins), max(bins), 1000)
+#             plt.plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
+
+#             #print(popt, pcov)
+#             plt.show()
+#             plt.clf()
+
+        #means = [np.mean(energy_diff) for energy_diff in energy_diffs]
+        #stds = [np.std(energy_diff) for energy_diff in energy_diffs]
         
         # The error bars are the stddevs
         ax[0, vind].errorbar(bincenters, means, stds, color='k', marker='o', ls='')
