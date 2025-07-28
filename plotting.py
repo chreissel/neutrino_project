@@ -276,11 +276,6 @@ def make_all_vs_all(variables, true, pred):
             # We will need the diff_unit and diff_factor here
             var_label2, var_unit2, diff_unit2, factor2, diff_factor2 = get_label_unit(var2)
             
-            # Don't make the same plot twice
-            if(vind2 > vind):
-                ax[vind, vind2].axis("off")
-                continue
-                
             diff = (true[:, vind2]-pred[:, vind2])/diff_factor
             ax[vind, vind2].hist2d(true_var, diff, bins=((np.linspace(min(true_var), max(true_var), 100), np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 100))), cmin=1)
             ax[vind, vind2].axhline(0, color='r', ls='--', lw='2')
