@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 class Project8Sim(Dataset):
-    def __init__(self, inputs, variables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, **kwargs):
+    def __init__(self, inputs, variables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True):
 
         arr = {}
         with h5py.File(path, 'r') as f:
@@ -66,7 +66,6 @@ class LitDataModule(GenericDataModule):
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
         self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [0.8,0.1,0.1], generator=generator)
-
         self.save_hyperparameters()
 
     def train_dataloader(self):
