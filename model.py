@@ -1,5 +1,8 @@
 from models.s4d import S4D
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 dropout_fn = nn.Dropout2d
 import lightning as L
 import numpy as np
@@ -25,7 +28,8 @@ class LitS4Model(L.LightningModule):
         # Linear decoder
         self.decoder = nn.Linear(d_model, d_output)
 
-        self.criterion = nn.MSELoss()
+        # self.criterion = nn.MSELoss()
+        self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
         self.d_output = d_output
         self.val_outputs = []
         self.variables = variables
@@ -57,7 +61,10 @@ class LitS4Model(L.LightningModule):
         # Pooling: average pooling over the sequence length
         x = x.mean(dim=1)
         # Decode the outputs
-        x = self.decoder(x)  # (B, d_model) -> (B, d_output)
+        x = self.decoder(x)  # (B, d_model) -> (B, 2*d_output)
+        self.mid_idx = int(self.d_output/2)
+        x_uncertainties = F.softplus(x[..., self.mid_idx:])
+        x = torch.cat([x[..., :self.mid_idx], x_uncertainties], dim=-1)
         return x
 
     def configure_optimizers(self):
@@ -68,8 +75,9 @@ class LitS4Model(L.LightningModule):
 
     def training_step(self, batch, batch_idx, log=True):
         X, y = batch
-        y_hat = self.forward(X)
-        loss = self.criterion(y_hat, y)
+        y_preds = self.forward(X)
+        y_hat, y_hat_sigma = y_preds[:,:self.mid_idx], y_preds[:,self.mid_idx:]
+        loss = self.criterion(y_hat, y, y_hat_sigma)
 
         if log:
             self.log("train/loss",
@@ -84,8 +92,9 @@ class LitS4Model(L.LightningModule):
 
     def validation_step(self, batch, batch_idx, log=True):
         X, y = batch
-        y_hat = self.forward(X)
-        loss = self.criterion(y_hat, y)
+        y_preds = self.forward(X)
+        y_hat, y_hat_sigma = y_preds[:,:self.mid_idx], y_preds[:,self.mid_idx:]
+        loss = self.criterion(y_hat, y, y_hat_sigma)
 
         #self.val_outputs.append((y.cpu().numpy(), y_hat.cpu().numpy()))
 
