@@ -10,7 +10,6 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 
 class LitS4Model(L.LightningModule):
-
     def __init__(self, d_input, d_output, variables, d_model=256, n_layers=4,
                 dropout=0.2, prenorm=False, loss='GaussianNLLLoss'):
         super().__init__()
