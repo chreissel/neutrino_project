@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 class LitS4Model(L.LightningModule):
 
-    def __init__(self,d_input,variables,d_output=10,d_model=256,n_layers=4,dropout=0.2,prenorm=False):
+    def __init__(self,d_input,d_output=10,d_model=256,n_layers=4,dropout=0.2,prenorm=False):
         super().__init__()
         self.prenorm = prenorm
         self.encoder = nn.Linear(d_input, d_model)
@@ -28,7 +28,6 @@ class LitS4Model(L.LightningModule):
         self.criterion = nn.MSELoss()
         self.d_output = d_output
         self.val_outputs = []
-        self.variables = variables
 
         self.save_hyperparameters()
 
@@ -67,7 +66,7 @@ class LitS4Model(L.LightningModule):
 
 
     def training_step(self, batch, batch_idx, log=True):
-        X, y = batch
+        X, y, _ = batch
         y_hat = self.forward(X)
         loss = self.criterion(y_hat, y)
 
@@ -83,7 +82,7 @@ class LitS4Model(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx, log=True):
-        X, y = batch
+        X, y, _ = batch
         y_hat = self.forward(X)
         loss = self.criterion(y_hat, y)
 

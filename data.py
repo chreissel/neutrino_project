@@ -39,6 +39,7 @@ class Project8Sim(Dataset):
     def __getitem__(self, idx):
         times = self.timeseries[idx, :, :]
         var = self.vars[idx]
+        obs = self.obs[idx, :]
         return times, var, obs
 
     def __outdim__(self):
@@ -67,6 +68,8 @@ class LitDataModule(GenericDataModule):
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
         self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [0.8,0.1,0.1], generator=generator)
+        self.observables = observables
+        self.variables = variables
         self.save_hyperparameters()
 
     def train_dataloader(self):
