@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 
 class LitS4Model(L.LightningModule):
 
-    def __init__(self,d_input,variables,d_output=10,d_model=256,n_layers=4,dropout=0.2,prenorm=False):
+    def __init__(self, d_input, d_output, variables, d_model=256, n_layers=4,
+                dropout=0.2, prenorm=False, loss='GaussianNLLLoss'):
         super().__init__()
         self.prenorm = prenorm
         self.encoder = nn.Linear(d_input, d_model)
@@ -28,13 +29,30 @@ class LitS4Model(L.LightningModule):
         # Linear decoder
         self.decoder = nn.Linear(d_model, d_output)
 
-        # self.criterion = nn.MSELoss()
-        self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
-        self.d_output = d_output
-        self.val_outputs = []
+        self.loss = loss
         self.variables = variables
+        # self.d_output = d_output
+        self.d_output = len(self.variables)
+        if self.loss=='MSELoss':
+            self.criterion = nn.MSELoss()
+        elif self.loss=='GaussianNLLLoss':
+            self.d_split = self.d_output
+            self.d_output = 2 * self.d_output
+            self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
+        else: raise ValueError(f'Unknown loss function {self.loss}')
+        self.val_outputs = []
 
         self.save_hyperparameters()
+
+    def __loss__(self, X, y):
+        y_preds = self.forward(X)
+        if self.loss=='MSELoss':
+            return self.criterion(X, y_preds)
+        elif self.loss=='GaussianNLLLoss':
+            y_hat, y_hat_variance = y_preds[:,:self.d_split], y_preds[:,self.d_split:]
+            print(y_hat.shape)
+            print(y_hat_variance.shape)
+            return self.criterion(y_hat, y, y_hat_variance)
 
     def forward(self, x):
         """
@@ -61,10 +79,10 @@ class LitS4Model(L.LightningModule):
         # Pooling: average pooling over the sequence length
         x = x.mean(dim=1)
         # Decode the outputs
-        x = self.decoder(x)  # (B, d_model) -> (B, 2*d_output)
-        self.mid_idx = int(self.d_output/2)
-        x_uncertainties = F.softplus(x[..., self.mid_idx:])
-        x = torch.cat([x[..., :self.mid_idx], x_uncertainties], dim=-1)
+        x = self.decoder(x)  # (B, d_model) -> (B, d_output)
+        if self.loss=='GaussianNLLLoss':
+            x_uncertainties = F.softplus(x[..., self.d_split:])
+            x = torch.cat([x[..., :self.d_split], x_uncertainties], dim=-1)
         return x
 
     def configure_optimizers(self):
@@ -72,12 +90,9 @@ class LitS4Model(L.LightningModule):
         scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
         return optimizer, scheduler
 
-
     def training_step(self, batch, batch_idx, log=True):
         X, y = batch
-        y_preds = self.forward(X)
-        y_hat, y_hat_sigma = y_preds[:,:self.mid_idx], y_preds[:,self.mid_idx:]
-        loss = self.criterion(y_hat, y, y_hat_sigma)
+        loss = self.__loss__(X, y)
 
         if log:
             self.log("train/loss",
@@ -92,9 +107,7 @@ class LitS4Model(L.LightningModule):
 
     def validation_step(self, batch, batch_idx, log=True):
         X, y = batch
-        y_preds = self.forward(X)
-        y_hat, y_hat_sigma = y_preds[:,:self.mid_idx], y_preds[:,self.mid_idx:]
-        loss = self.criterion(y_hat, y, y_hat_sigma)
+        loss = self.__loss__(X, y)
 
         #self.val_outputs.append((y.cpu().numpy(), y_hat.cpu().numpy()))
 
@@ -108,4 +121,3 @@ class LitS4Model(L.LightningModule):
                     prog_bar=True)
 
         return loss
-
