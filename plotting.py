@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
 my_viridis = cm.get_cmap("viridis", 1024).with_extremes(under="white")
+import os
 
 # General formatting
 SMALL_SIZE = 10
@@ -60,6 +61,38 @@ def get_label_unit(var):
         
     return label, unit, diff_unit, factor, diff_factor
 
+def make_distribution(variables, true):
+    # Plot truth distribution of variables - this gives a sense of whether the underlying distribution of sims is even
+    #
+    # INPUTS
+    #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
+    #    true: array of true values from the model
+    #
+    # OUTPUTS
+    #    fig: figure with the plot
+    
+    # There will be one plot per variable
+    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
+    
+    # Loop over the variables
+    for vind, var in enumerate(variables):
+        
+        var_label, var_unit, _, factor, _ = get_label_unit(var)
+        
+        # Divide by factor to get the desired units
+        true_var = true[:, vind]/factor
+        
+        ax[0, vind].hist(true_var, bins=np.linspace(min(true_var), max(true_var), 100), label='%d events'%len(true_var))
+        ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
+        ax[0, vind].set_ylabel('events')
+        ax[0, vind].set_xlim(min(true_var), max(true_var))
+        ax[0, vind].legend()
+        
+    plt.tight_layout()
+
+    return fig
+
+
 def make_bias(variables, true, pred):
     # Plot the true parameter vs. the pred parameter
     #
@@ -113,14 +146,14 @@ def make_res(variables, true, pred):
         pred_var = pred[:, vind]
         diff = (true_var-pred_var)/diff_factor
         
-        hist, bins, _ = ax[0, vind].hist(diff,bins=500,weights=np.ones(len(true_var))*1/float(len(true_var)))
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-        popt, pcov = curve_fit(gaussian, bin_centers, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
+        hist, bins, _ = ax[0, vind].hist(diff,bins=np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 500),weights=np.ones(len(true_var))*1/float(len(true_var)))
+        bincenters = (bins[:-1] + bins[1:]) / 2
+        popt, pcov = curve_fit(gaussian, bincenters, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
         amplitude_fit, mean_fit, stddev_fit = popt
 
         x_fit = np.linspace(min(bins), max(bins), 1000)
         ax[0, vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
-        ax[0, vind].set_xlim(mean_fit-5*stddev_fit, mean_fit+5*stddev_fit)
+        ax[0, vind].set_xlim(-5*stddev_fit, 5*stddev_fit)
         ax[0, vind].set_xlabel('residual '+var_label+ ' '+'['+diff_unit+']')
         ax[0, vind].set_ylabel('A.U.')
         ax[0, vind].legend()
@@ -143,10 +176,11 @@ def make_energy_res(variables, true, pred):
 
     # There will be one plot per variable
     fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
-    
+    fig2, ax2 = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
+
     eind = variables.index('energy_eV')
-    energy_diff = true[:, eind]-pred[:, eind]
     
+    maxnum = 0
     # Loop over the variables
     for vind, var in enumerate(variables):
         var_label, var_unit, _, factor, _ = get_label_unit(var)
@@ -163,9 +197,41 @@ def make_energy_res(variables, true, pred):
         idxs_all = [np.where((true_var >= var_bins[i]) & (true_var <= var_bins[i+1])) for i in range(len(var_bins)-1)]
         # Find the energy differences corresponding to these bins, then take the mean and stddev
         energy_diffs = [np.squeeze(true[idxs, eind]-pred[idxs, eind]) for idxs in idxs_all] 
-        means = [np.mean(energy_diff) for energy_diff in energy_diffs]
-        stds = [np.std(energy_diff) for energy_diff in energy_diffs]
-        
+        #lens = [len(ediff) for ediff in energy_diffs]
+        means = []
+        stds = []
+        lens = []
+        for energy_diff in energy_diffs:
+            if(energy_diff.size <= 1):
+                means.append(np.nan)
+                stds.append(np.nan)
+                lens.append(np.nan)
+                continue
+            hist, bins, _ = ax[0, vind].hist(energy_diff,bins=100)
+            ax[0, vind].clear()
+            bincenters_g = (bins[:-1] + bins[1:]) / 2
+            try:
+                popt, pcov = curve_fit(gaussian, bincenters_g, hist, p0=[max(hist), np.mean(energy_diff), np.std(energy_diff)])
+                amplitude_fit, mean_fit, stddev_fit = popt
+                means.append(mean_fit)
+                stds.append(stddev_fit)
+                lens.append(len(energy_diff))
+            except:
+                means.append(np.nan)
+                stds.append(np.nan)
+                lens.append(np.nan)
+
+        if(maxnum==0):
+            maxnum = np.nanmax(lens) + 10
+        ax2[0, vind].plot(lens, stds, 'k.')
+        ax2[0, vind].set_xlabel('events in '+var_label+' bin')
+        ax2[0, vind].set_ylabel('std [eV]')
+        ax2[0, vind].axhline(0.3, ls='--', color='b')
+        ax2[0, vind].set_ylabel('std ['+var_unit+']')
+        ax2[0, vind].set_ylim(0, max(stds)+0.1)
+        ax2[0, vind].set_xlim(0, max(lens))
+
+
         # The error bars are the stddevs
         ax[0, vind].errorbar(bincenters, means, stds, color='k', marker='o', ls='')
         ax[0, vind].axhline(0, color='r', ls='--', lw='2')
@@ -177,9 +243,10 @@ def make_energy_res(variables, true, pred):
         ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
         ax[0, vind].set_ylabel('true-pred energy [eV]')
         
-    plt.tight_layout()
+    fig.tight_layout()
+    fig2.tight_layout()
     
-    return fig
+    return fig, fig2
         
 def make_all_vs_all(variables, true, pred):
     # Plot the true-pred difference of all variables as a function of all variables
@@ -209,11 +276,6 @@ def make_all_vs_all(variables, true, pred):
             # We will need the diff_unit and diff_factor here
             var_label2, var_unit2, diff_unit2, factor2, diff_factor2 = get_label_unit(var2)
             
-            # Don't make the same plot twice
-            if(vind2 > vind):
-                ax[vind, vind2].axis("off")
-                continue
-                
             diff = (true[:, vind2]-pred[:, vind2])/diff_factor
             ax[vind, vind2].hist2d(true_var, diff, bins=((np.linspace(min(true_var), max(true_var), 100), np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 100))), cmin=1)
             ax[vind, vind2].axhline(0, color='r', ls='--', lw='2')
@@ -223,7 +285,8 @@ def make_all_vs_all(variables, true, pred):
 
     return fig
 
-def make_all_plots(variables, true, pred):
+def make_all_plots(variables, true, pred, folder=[], savefigs=False):
+    print(folder)
     # Make all plots
     #
     # INPUTS
@@ -233,11 +296,29 @@ def make_all_plots(variables, true, pred):
     # OUTPUTS
     #    res, bias, all_vs_all, energy_res: figures to be saved later, if desired
     
+    dist = make_distribution(variables, true)
     res = make_res(variables, true, pred)
     bias = make_bias(variables, true, pred)
     all_vs_all = make_all_vs_all(variables, true, pred)
     # Only make the energy resolution plot if the energy variable is present
+    
     if 'energy_eV' in variables:
-        energy_res = make_energy_res(variables, true, pred)
-        return res, bias, all_vs_all, energy_res
-    res, bias, all_vs_all
+        energy_res, nums = make_energy_res(variables, true, pred)
+    
+    if(savefigs):
+        if(folder==[]):
+            print("Please provide folder to save figures")
+        else:
+            if not os.path.isdir(folder):
+                os.mkdir(folder)
+            dist.savefig(folder+'/distributions.png')
+            res.savefig(folder+'/resolutions.png')
+            bias.savefig(folder+'/biases.png')
+            all_vs_all.savefig(folder+'/all_vs_all.png')
+            if('energy_eV' in variables):
+                nums.savefig(folder+'/std_vs_num.png')
+                energy_res.savefig(folder+'/energy_res.png')
+    if 'energy_eV' in variables:
+        return dist, res, bias, all_vs_all, energy_res
+
+    return dist, res, bias, all_vs_all

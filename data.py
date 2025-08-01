@@ -17,12 +17,16 @@ class Project8Sim(Dataset):
         X = np.swapaxes(X,1,2)[:,:cutoff, :]
         y = np.concatenate([arr[v] for v in variables], axis = 1)
         obs = np.concatenate([arr[i] for o in observables], axis = 1)
-
+        
         if norm:
             mu_y = np.mean(y, axis=0)
             stds_y = np.std(y, axis=0)
             y = (y-mu_y)/stds_y
 
+            stds_X = np.std(X, axis=1)
+            for i in range(len(stds_X)):
+                X[i, :, :] = X[i, :, :]/stds_X[i]
+            
         self.mu = mu_y
         self.stds = stds_y
         self.timeseries = np.float32(X)
@@ -63,7 +67,6 @@ class LitDataModule(GenericDataModule):
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
         self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [0.8,0.1,0.1], generator=generator)
-
         self.save_hyperparameters()
 
     def train_dataloader(self):
