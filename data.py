@@ -5,17 +5,18 @@ import numpy as np
 import torch
 
 class Project8Sim(Dataset):
-    def __init__(self, inputs, variables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True):
+    def __init__(self, inputs, variables, observables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True):
 
         arr = {}
         with h5py.File(path, 'r') as f:
-            for i in inputs+variables:
+            for i in inputs+variables+observables:
                 #arr[i] = f[i][:100]
                 arr[i] = f[i][:]
                 arr[i] = arr[i][:, np.newaxis]
         X = np.concatenate([arr[i] for i in inputs], axis = 1)
         X = np.swapaxes(X,1,2)[:,:cutoff, :]
         y = np.concatenate([arr[v] for v in variables], axis = 1)
+        obs = np.concatenate([arr[i] for o in observables], axis = 1)
 
         if norm:
             mu_y = np.mean(y, axis=0)
@@ -26,6 +27,7 @@ class Project8Sim(Dataset):
         self.stds = stds_y
         self.timeseries = np.float32(X)
         self.vars = np.float32(y)
+        self.obs = np.float32(obs)
 
     def __len__(self):
         return self.vars.shape[0]
@@ -33,7 +35,7 @@ class Project8Sim(Dataset):
     def __getitem__(self, idx):
         times = self.timeseries[idx, :, :]
         var = self.vars[idx]
-        return times, var
+        return times, var, obs
 
     def __outdim__(self):
         return self.vars.shape[1]
@@ -53,10 +55,10 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, **kwargs):
+    def __init__(self, inputs, variables, observables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, **kwargs):
         super().__init__(**kwargs)
        
-        dataset = Project8Sim(inputs, variables, path, cutoff, norm)
+        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm)
         self.mu = dataset.mu
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
