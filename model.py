@@ -13,6 +13,17 @@ class LitS4Model(L.LightningModule):
     def __init__(self, d_input, d_output, d_model=256, n_layers=4,
                 dropout=0.2, prenorm=False, loss='MSELoss'):
         super().__init__()
+
+        self.loss = loss
+        self.d_output = d_output
+        if self.loss=='MSELoss':
+            self.criterion = nn.MSELoss()
+        elif self.loss=='GaussianNLLLoss':
+            self.d_split = self.d_output
+            self.d_output = 2 * self.d_output
+            self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
+        else: raise ValueError(f'Unknown loss function {self.loss}')
+
         self.prenorm = prenorm
         self.encoder = nn.Linear(d_input, d_model)
         # Stack S4 layers as residual blocks
@@ -26,16 +37,8 @@ class LitS4Model(L.LightningModule):
             self.norms.append(nn.LayerNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
         # Linear decoder
-        self.decoder = nn.Linear(d_model, d_output)
-        self.loss = loss
-        self.d_output = d_output 
-        if self.loss=='MSELoss':
-            self.criterion = nn.MSELoss()
-        elif self.loss=='GaussianNLLLoss':
-            self.d_split = self.d_output
-            self.d_output = 2 * self.d_output
-            self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
-        else: raise ValueError(f'Unknown loss function {self.loss}')
+        self.decoder = nn.Linear(d_model, self.d_output)
+        
         self.val_outputs = []
 
         self.save_hyperparameters()
