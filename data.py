@@ -16,7 +16,7 @@ class Project8Sim(Dataset):
         X = np.concatenate([arr[i] for i in inputs], axis = 1)
         X = np.swapaxes(X,1,2)[:,:cutoff, :]
         y = np.concatenate([arr[v] for v in variables], axis = 1)
-        obs = np.concatenate([arr[i] for o in observables], axis = 1)
+        obs = np.concatenate([arr[o] for o in observables], axis = 1)
         
         if norm:
             mu_y = np.mean(y, axis=0)

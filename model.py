@@ -90,7 +90,7 @@ class LitS4Model(L.LightningModule):
         return optimizer, scheduler
 
     def training_step(self, batch, batch_idx, log=True):
-        X, y = batch
+        X, y, _ = batch
         loss = self.__loss__(X, y)
 
         if log:
@@ -105,7 +105,7 @@ class LitS4Model(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx, log=True):
-        X, y = batch
+        X, y, _ = batch
         loss = self.__loss__(X, y)
 
         #self.val_outputs.append((y.cpu().numpy(), y_hat.cpu().numpy()))
