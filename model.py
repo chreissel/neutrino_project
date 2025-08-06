@@ -10,8 +10,8 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 
 class LitS4Model(L.LightningModule):
-    def __init__(self, d_input, d_output, variables, d_model=256, n_layers=4,
-                dropout=0.2, prenorm=False, loss='GaussianNLLLoss'):
+    def __init__(self, d_input, d_output, d_model=256, n_layers=4,
+                dropout=0.2, prenorm=False, loss='MSELoss'):
         super().__init__()
         self.prenorm = prenorm
         self.encoder = nn.Linear(d_input, d_model)
@@ -27,11 +27,8 @@ class LitS4Model(L.LightningModule):
             self.dropouts.append(dropout_fn(dropout))
         # Linear decoder
         self.decoder = nn.Linear(d_model, d_output)
-
         self.loss = loss
-        self.variables = variables
-        # self.d_output = d_output
-        self.d_output = len(self.variables)
+        self.d_output = d_output 
         if self.loss=='MSELoss':
             self.criterion = nn.MSELoss()
         elif self.loss=='GaussianNLLLoss':
@@ -46,11 +43,9 @@ class LitS4Model(L.LightningModule):
     def __loss__(self, X, y):
         y_preds = self.forward(X)
         if self.loss=='MSELoss':
-            return self.criterion(X, y_preds)
+            return self.criterion(y, y_preds)
         elif self.loss=='GaussianNLLLoss':
             y_hat, y_hat_variance = y_preds[:,:self.d_split], y_preds[:,self.d_split:]
-            print(y_hat.shape)
-            print(y_hat_variance.shape)
             return self.criterion(y_hat, y, y_hat_variance)
 
     def forward(self, x):
