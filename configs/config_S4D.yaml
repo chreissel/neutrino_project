@@ -15,7 +15,7 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 2
+  max_epochs: 1
 
 data:
   class_path: data.LitDataModule
@@ -51,3 +51,5 @@ model:
            n_layers: 6
            dropout: 0.0
            prenorm: False
+    loss: WeightedMSELoss
+    weights: [2,1]
