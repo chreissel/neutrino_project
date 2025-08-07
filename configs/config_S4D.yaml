@@ -40,14 +40,14 @@ lr_scheduler:
 model:
   class_path: model.LitS4Model
   init_args:
-    d_input: 1
-    d_output: 2
+    d_input: &d_input 1
+    d_output: &d_output 2
     encoder:
         class_path: models.networks.S4DModel
         init_args: 
-                d_input: 1
-                d_output: 2
-                d_model: 10
-                n_layers: 6
-                dropout: 0.0
-                prenorm: False
+           d_input: *d_input
+           d_output: *d_output
+           d_model: 10
+           n_layers: 6
+           dropout: 0.0
+           prenorm: False

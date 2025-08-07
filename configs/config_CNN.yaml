@@ -40,14 +40,14 @@ lr_scheduler:
 model:
   class_path: model.LitS4Model
   init_args:
-    d_input: 1
-    d_output: 2
+    d_input: &d_input 1
+    d_output: &d_output 2
     encoder:
         class_path: models.networks.ConvResidualNet
         init_args:
-                d_input: 1
-                d_output: 2
-                out_channels: 2
-                hidden_channels: 20 
-                num_blocks: 4
-                kernel_size: 21
+            d_input: *d_input 
+            d_output: *d_output
+            out_channels: 2
+            hidden_channels: 20 
+            num_blocks: 4
+            kernel_size: 21
