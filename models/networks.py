@@ -46,19 +46,19 @@ class ConvResidualBlock(nn.Module):
 class ConvResidualNet(nn.Module):
     def __init__(
         self,
-        in_channels,
+        d_input,
+        d_output,
         out_channels,
         hidden_channels,
         num_blocks=2,
         kernel_size=5,
-        activation=F.relu,
         dropout_probability=0.1,
         use_batch_norm=True,
     ):
         super().__init__()
         self.hidden_channels = hidden_channels
         self.initial_layer = nn.Conv1d(
-            in_channels=in_channels,
+            in_channels=d_input,
             out_channels=hidden_channels,
             kernel_size=kernel_size,
             padding='same',
@@ -67,7 +67,7 @@ class ConvResidualNet(nn.Module):
             [
                 ConvResidualBlock(
                     channels=hidden_channels,
-                    activation=activation,
+                    activation=F.relu,
                     dropout_probability=dropout_probability,
                     use_batch_norm=use_batch_norm,
                     kernel_size=kernel_size,
@@ -78,12 +78,18 @@ class ConvResidualNet(nn.Module):
         self.final_layer = nn.Conv1d(
             hidden_channels, out_channels, kernel_size=1, padding='same'
         )
+        self.decoder = nn.Linear(out_channels, d_output)
 
     def forward(self, inputs):
+        inputs = torch.transpose(inputs, 1, 2)
         temps = self.initial_layer(inputs)
         for block in self.blocks:
             temps = block(temps)
-        outputs = self.final_layer(temps)
+        temps = self.final_layer(temps)
+        # Pooling: average pooling over the sequence length
+        temps = temps.mean(dim=2)
+        # Decode the outputs
+        outputs = self.decoder(temps)  
         return outputs
 
 
