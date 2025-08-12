@@ -6,7 +6,7 @@ import torch
 from noise import *
 
 class Project8Sim(Dataset):
-    def __init__(self, inputs, variables, observables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True, noise_const=1, apply_filter = True):
+    def __init__(self, inputs, variables, observables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True, noise_const=1, apply_filter = False):
 
         arr = {}
         with h5py.File(path, 'r') as f:
@@ -72,7 +72,7 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, observables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, noise_const=1, apply_filter=True, **kwargs):
+    def __init__(self, inputs, variables, observables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, noise_const=1, apply_filter=False, **kwargs):
         super().__init__(**kwargs)
        
         dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter)
