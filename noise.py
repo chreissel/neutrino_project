@@ -19,6 +19,17 @@ def noise_model(len_array, constant=1):
     sigma = np.sqrt(R * 0.5) * np.sqrt(2.2e-13 * constant * sampling_freq) # for correct SNR, per Penny                                                                                                                                                                                                                                                                     
     return np.random.normal(mu, sigma, len_array)
 
+# Butterworth bandpass filter
+# lowcut and highcut should be chosen based on expected range of the cavity bandwidth
+#
+# INPUTS
+#    data: the time series array to filter
+#    lowcut: the lower frequency bound (Hz)
+#    highcut: the upper frequency bound (Hz)
+#    order: how steeply frequencies are attenuated outside the cutoff
+#
+# OUTPUTS
+#    the filtered time series array
 def bandpass_filter(data, lowcut=0.5E8, highcut=0.8E8, order=4):
     fs = 403E6
     nyquist = 0.5 * fs

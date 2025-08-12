@@ -19,13 +19,15 @@ class Project8Sim(Dataset):
         y = np.concatenate([arr[v] for v in variables], axis = 1)
         obs = np.concatenate([arr[o] for o in observables], axis = 1)
 
+        # add noise and normalize by std
+        
         for i in range(X.shape[0]):
             for j in range(X.shape[2]):
                 noise_arr = noise_model(cutoff, noise_const)
                 X_noise = X[i, :, j] + noise_arr
-                if(apply_filter):
+                if(apply_filter): # whether to apply the band pass filter
                     X_noise = bandpass_filter(X_noise)
-                if(norm):
+                if(norm): # whether to normalize by std
                     std_X = np.std(X_noise)
                 else:
                     std_X = 1
