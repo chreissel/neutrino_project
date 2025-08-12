@@ -6,7 +6,7 @@ import torch
 from noise import *
 
 class Project8Sim(Dataset):
-    def __init__(self, inputs, variables, observables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True, noise_const=1):
+    def __init__(self, inputs, variables, observables, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', cutoff=4000, norm=True, noise_const=1, apply_filter = True):
 
         arr = {}
         with h5py.File(path, 'r') as f:
@@ -18,22 +18,24 @@ class Project8Sim(Dataset):
         X = np.swapaxes(X,1,2)[:,:cutoff, :]
         y = np.concatenate([arr[v] for v in variables], axis = 1)
         obs = np.concatenate([arr[o] for o in observables], axis = 1)
+
+        for i in range(X.shape[0]):
+            for j in range(X.shape[2]):
+                noise_arr = noise_model(cutoff, noise_const)
+                X_noise = X[i, :, j] + noise_arr
+                if(apply_filter):
+                    X_noise = bandpass_filter(X_noise)
+                if(norm):
+                    std_X = np.std(X_noise)
+                else:
+                    std_X = 1
+                X[i, :, j] = X_noise/std_X
+
         
         if norm:
             mu_y = np.mean(y, axis=0)
             stds_y = np.std(y, axis=0)
             y = (y-mu_y)/stds_y
-
-            stds_X = np.std(X, axis=1)
-            #for i in range(len(stds_X)):
-            #    X[i, :, :] = X[i, :, :]/stds_X[i]
-            for i in range(X.shape[0]):
-                for j in range(X.shape[2]):
-                    noise_arr = noise_model(cutoff, noise_const)
-                    X_noise = X[i, :, j] + noise_arr
-                    std_X = np.std(X_noise)
-                    X[i, :, j] = X_noise/std_X
-
             
         self.mu = mu_y
         self.stds = stds_y
@@ -68,10 +70,10 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, observables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, noise_const=1, **kwargs):
+    def __init__(self, inputs, variables, observables, cutoff=4000, path='/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_v2.hdf5', norm=True, noise_const=1, apply_filter=True, **kwargs):
         super().__init__(**kwargs)
        
-        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const)
+        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter)
         self.mu = dataset.mu
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)

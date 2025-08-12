@@ -1,5 +1,5 @@
 import numpy as np
-
+from scipy.signal import butter, filtfilt
 
 # Basic Gaussian noise model for time series
 # Noise should be added separately for each channel (i.e., I and Q)
@@ -18,3 +18,11 @@ def noise_model(len_array, constant=1):
     R = 50 #ohms                                                                                                                                                                                                                                                                                                                                                            
     sigma = np.sqrt(R * 0.5) * np.sqrt(2.2e-13 * constant * sampling_freq) # for correct SNR, per Penny                                                                                                                                                                                                                                                                     
     return np.random.normal(mu, sigma, len_array)
+
+def bandpass_filter(data, lowcut=0.5E8, highcut=0.8E8, order=4):
+    fs = 403E6
+    nyquist = 0.5 * fs
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    b, a = butter(order, [low, high], btype='band')
+    return filtfilt(b, a, data)
