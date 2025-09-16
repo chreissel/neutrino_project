@@ -3,6 +3,18 @@ import torch
 import torch.nn.functional as F
 from .s4d import S4D
 
+activations = {
+    "relu": nn.ReLU(),
+    "sigmoid": nn.Sigmoid(),
+    "tanh": nn.Tanh(),
+    "elu": nn.ELU(),
+    "leaky_relu": nn.LeakyReLU(),
+    "gelu": nn.GELU(),
+    "tanh": nn.Tanh(),
+    "swish": nn.SiLU(),
+    "mish": nn.Mish()
+}
+
 class ConvResidualBlock(nn.Module):
     def __init__(
         self,
@@ -92,10 +104,33 @@ class ConvResidualNet(nn.Module):
         outputs = self.decoder(temps)  
         return outputs
 
+class MLP(nn.Module):
+    def __init__(self, input_dim, hidden_dims, output_dim, dropout=0.0, activation='relu', output_activation=None, input_activation=None):
+        super().__init__()
+        layers = []
+        if input_activation is not None:
+            layers.append(input_activation())
+        current_dim = input_dim
+
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(current_dim, hidden_dim))
+            layers.append(activations[activation])
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            current_dim = hidden_dim
+
+        layers.append(nn.Linear(current_dim, output_dim))
+        if output_activation is not None:
+            layers.append(activations[output_activation])
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.network(x)
+
 
 dropout_fn = nn.Dropout2d
 class S4DModel(nn.Module):
-    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False):
+    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32]):
         super().__init__()
 
         self.d_output = d_output
@@ -113,7 +148,8 @@ class S4DModel(nn.Module):
             self.norms.append(nn.LayerNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
         # Linear decoder
-        self.decoder = nn.Linear(d_model, d_output)
+        #self.decoder = nn.Linear(d_model, d_output)
+        self.decoder = MLP(d_model, fc_hidden, d_output)
 
     def forward(self, x):
         x = self.encoder(x)  # (B, L, d_input) -> (B, L, d_model)
