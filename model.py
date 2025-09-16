@@ -8,9 +8,10 @@ import lightning as L
 import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
+from losses import WeightedMSELoss
 
 class LitS4Model(L.LightningModule):
-    def __init__(self, d_input, d_output, encoder: nn.Module, loss='MSELoss'):
+    def __init__(self, d_input, d_output, encoder: nn.Module, loss='MSELoss',weights=None):
         super().__init__()
 
         self.encoder = encoder
@@ -18,6 +19,9 @@ class LitS4Model(L.LightningModule):
         self.d_output = d_output
         if self.loss=='MSELoss':
             self.criterion = nn.MSELoss()
+        elif self.loss=='WeightedMSELoss':
+            self.weights = weights
+            self.criterion = WeightedMSELoss(weights=weights)
         elif self.loss=='GaussianNLLLoss':
             self.d_split = self.d_output
             self.d_output = 2 * self.d_output
@@ -31,6 +35,8 @@ class LitS4Model(L.LightningModule):
     def __loss__(self, X, y):
         y_preds = self.forward(X)
         if self.loss=='MSELoss':
+            return self.criterion(y, y_preds)
+        elif self.loss=='WeightedMSELoss':
             return self.criterion(y, y_preds)
         elif self.loss=='GaussianNLLLoss':
             y_hat, y_hat_variance = y_preds[:,:self.d_split], y_preds[:,self.d_split:]
