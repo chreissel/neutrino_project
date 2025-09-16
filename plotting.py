@@ -61,7 +61,7 @@ def get_label_unit(var):
         
     return label, unit, diff_unit, factor, diff_factor
 
-def make_distribution(variables, true):
+def make_distribution(variables, observables, true, meta):
     # Plot truth distribution of variables - this gives a sense of whether the underlying distribution of sims is even
     #
     # INPUTS
@@ -71,8 +71,10 @@ def make_distribution(variables, true):
     # OUTPUTS
     #    fig: figure with the plot
     
+    num_plots = len(variables) + len(observables)
+    
     # There will be one plot per variable
-    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
+    fig, ax = plt.subplots(1, num_plots, figsize=(4*num_plots, 4), squeeze=False)
     
     # Loop over the variables
     for vind, var in enumerate(variables):
@@ -87,6 +89,19 @@ def make_distribution(variables, true):
         ax[0, vind].set_ylabel('events')
         ax[0, vind].set_xlim(min(true_var), max(true_var))
         ax[0, vind].legend()
+        
+    for oind, obs in enumerate(observables):
+        
+        obs_label, obs_unit, _, factor, _ = get_label_unit(obs)
+        
+        # Divide by factor to get the desired units
+        meta_factor = meta[:, oind]/factor
+        ax[0, vind+oind+1].hist(meta_factor, bins=np.linspace(min(meta_factor), max(meta_factor), 100), label='%d events'%len(meta_factor))
+        ax[0, vind+oind+1].set_xlabel('true ' + obs_label + ' ['+obs_unit+']')
+        ax[0, vind+oind+1].set_ylabel('events')
+        ax[0, vind+oind+1].set_xlim(min(meta_factor), max(meta_factor))
+        ax[0, vind+oind+1].legend()
+
         
     plt.tight_layout()
 
@@ -162,7 +177,7 @@ def make_res(variables, true, pred):
     
     return fig
     
-def make_energy_res(variables, true, pred):
+def make_energy_res(variables, observables, true, pred, meta):
     # Plot the energy resolution as a function of all variables.  The mean and stddev of the events in each bin are plotted
     # The goal is to determine whether the energy resolution is better in certain regions of the parameter space
     #
@@ -174,21 +189,23 @@ def make_energy_res(variables, true, pred):
     # OUTPUTS
     #    fig: figure with the plot
 
-    # There will be one plot per variable
-    fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
-    fig2, ax2 = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
+    all_var_names = variables + observables
+    all_true = np.zeros((len(true), len(all_var_names)))
+    all_true[:, :len(variables)] = true
+    all_true[:, len(variables):] = meta
 
-    eind = variables.index('energy_eV')
+    # There will be one plot per variable
+    fig, ax = plt.subplots(1, len(all_var_names), figsize=(4*len(all_var_names), 4), squeeze=False)
+    fig2, ax2 = plt.subplots(1, len(all_var_names), figsize=(4*len(all_var_names), 4), squeeze=False)
+
+    eind = all_var_names.index('energy_eV')
     
     maxnum = 0
     # Loop over the variables
-    for vind, var in enumerate(variables):
+    for vind, var in enumerate(all_var_names):
         var_label, var_unit, _, factor, _ = get_label_unit(var)
-        
         # Divide by factor to get the desired units
-        true_var = true[:, vind]/factor
-        pred_var = pred[:, vind]/factor
-        
+        true_var = all_true[:, vind]/factor
         # Define 20 bins across the full parameter space over which to take means and stdevs
         var_bins = np.linspace(min(true_var), max(true_var), 20)
         bincenters = (var_bins[:-1] + var_bins[1:]) / 2
@@ -196,7 +213,7 @@ def make_energy_res(variables, true, pred):
         # Find the indices corresponding to each of the variable bins
         idxs_all = [np.where((true_var >= var_bins[i]) & (true_var <= var_bins[i+1])) for i in range(len(var_bins)-1)]
         # Find the energy differences corresponding to these bins, then take the mean and stddev
-        energy_diffs = [np.squeeze(true[idxs, eind]-pred[idxs, eind]) for idxs in idxs_all] 
+        energy_diffs = [np.squeeze(all_true[idxs, eind]-pred[idxs, eind]) for idxs in idxs_all] 
         #lens = [len(ediff) for ediff in energy_diffs]
         means = []
         stds = []
@@ -226,20 +243,22 @@ def make_energy_res(variables, true, pred):
         ax2[0, vind].plot(lens, stds, 'k.')
         ax2[0, vind].set_xlabel('events in '+var_label+' bin')
         ax2[0, vind].set_ylabel('std [eV]')
+        ax2[0, vind].fill_between([0, np.nanmax(lens)], [0, 0], [0.3, 0.3], alpha=0.5)
         ax2[0, vind].axhline(0.3, ls='--', color='b')
         ax2[0, vind].set_ylabel('std ['+var_unit+']')
-        ax2[0, vind].set_ylim(0, max(stds)+0.1)
-        ax2[0, vind].set_xlim(0, max(lens))
+        ax2[0, vind].set_ylim(0, 1)#np.nanmax(stds)+0.1)
+        ax2[0, vind].set_xlim(0, np.nanmax(lens))
 
 
         # The error bars are the stddevs
+        #print(stds)
         ax[0, vind].errorbar(bincenters, means, stds, color='k', marker='o', ls='')
         ax[0, vind].axhline(0, color='r', ls='--', lw='2')
         # This region corresponds to the desired resolution of 0.3 eV stddev
         ax[0, vind].fill_between(var_bins, np.ones(len(var_bins))*-0.3, np.ones(len(var_bins))*0.3, alpha=0.5, label="0.3 eV std")
         ax[0, vind].legend()
         ax[0, vind].set_xlim(min(var_bins), max(var_bins))
-        ax[0, vind].set_ylim(-3,3)
+        ax[0, vind].set_ylim(-1,1)
         ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
         ax[0, vind].set_ylabel('true-pred energy [eV]')
         
@@ -248,7 +267,7 @@ def make_energy_res(variables, true, pred):
     
     return fig, fig2
         
-def make_all_vs_all(variables, true, pred):
+def make_all_vs_all(variables, observables, true, pred, meta):
     # Plot the true-pred difference of all variables as a function of all variables
     # Note that the unit for the difference may be different than the unit for the variable
     # This also includes true-pred difference for a variable as a function of itself
@@ -261,8 +280,10 @@ def make_all_vs_all(variables, true, pred):
     # OUTPUTS
     #    fig: figure with the plot
 
+    num_plots = len(variables)# + len(observables)
+        
     # It will be a grid of size len(variables) x len(variables)
-    fig, ax = plt.subplots(len(variables), len(variables), figsize=((4*len(variables), 4*len(variables))), squeeze=False)
+    fig, ax = plt.subplots(num_plots, num_plots, figsize=((4*len(variables), 4*len(variables))), squeeze=False)
     
     # Loop over the variables
     for vind, var in enumerate(variables):
@@ -285,7 +306,7 @@ def make_all_vs_all(variables, true, pred):
 
     return fig
 
-def make_all_plots(variables, true, pred, folder=[], savefigs=False):
+def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs=False):
     print(folder)
     # Make all plots
     #
@@ -296,14 +317,14 @@ def make_all_plots(variables, true, pred, folder=[], savefigs=False):
     # OUTPUTS
     #    res, bias, all_vs_all, energy_res: figures to be saved later, if desired
     
-    dist = make_distribution(variables, true)
+    dist = make_distribution(variables, observables, true, meta)
     res = make_res(variables, true, pred)
     bias = make_bias(variables, true, pred)
-    all_vs_all = make_all_vs_all(variables, true, pred)
+    all_vs_all = make_all_vs_all(variables, observables, true, pred, meta)
     # Only make the energy resolution plot if the energy variable is present
     
     if 'energy_eV' in variables:
-        energy_res, nums = make_energy_res(variables, true, pred)
+        energy_res, nums = make_energy_res(variables, observables, true, pred, meta)
     
     if(savefigs):
         if(folder==[]):
