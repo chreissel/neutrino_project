@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/test/'
+  default_root_dir: 'runs/noise_fftabs_dmodel18_layers6_lr1e-3_gamma0.99/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -10,33 +10,36 @@ trainer:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: val/loss
-        patience: 5
+        patience: 10
         mode: min
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 1
+  max_epochs: 80
 
 data:
   class_path: data.LitDataModule
   init_args:
-    inputs: ['output_ts_I']
+    inputs: ['output_ts_I', 'output_ts_Q']
     variables: ['energy_eV', 'pitch_angle_deg']
     observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
     batch_size: 256
-    num_workers: 1
-    path: /gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5
+    num_workers: 4
+    path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
+    cutoff: 8192
+    apply_fft: True
+    complex_channels: False
 
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 1e-2
+    lr: 1e-3
 
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.ExponentialLR
   init_args:
-    gamma: 0.75
-    
+    gamma: 0.99
+
 model:
   class_path: model.LitS4Model
   init_args:
@@ -44,12 +47,11 @@ model:
     d_output: &d_output 2
     encoder:
         class_path: models.networks.S4DModel
-        init_args: 
+        init_args:
            d_input: *d_input
            d_output: *d_output
-           d_model: 10
+           d_model: 18
            n_layers: 6
            dropout: 0.0
            prenorm: False
-    loss: WeightedMSELoss
-    weights: [2,1]
+           fc_hidden: []

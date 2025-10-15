@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/input_I__output_energy_pitch__d_model_10_n_layers_6_gamma0.75_normX/'
+  default_root_dir: 'runs/input_I__output_energy_pitch__d_model_18_n_layers_6_gamma0.75_normX/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -22,9 +22,11 @@ data:
   init_args:
     inputs: ['output_ts_I']
     variables: ['energy_eV', 'pitch_angle_deg']
+    observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
+    noise_const: 0
     batch_size: 32
     num_workers: 1
-    path: '/n/holystore01/LABS/iaifi_lab/Lab/hbinney/combined_data_fullsim_old.hdf5'
+    path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
 
 optimizer:
   class_path: torch.optim.AdamW
@@ -35,14 +37,20 @@ lr_scheduler:
   class_path: torch.optim.lr_scheduler.ExponentialLR
   init_args:
     gamma: 0.75
-    
+
 model:
   class_path: model.LitS4Model
   init_args:
-    d_input: 1
-    d_output: 2
-    d_model: 10
-    n_layers: 6
-    dropout: 0.0
-    prenorm: False
-    variables: ['energy_eV', 'pitch_angle_deg']
+    d_input: &d_input 1
+    d_output: &d_output 2
+    encoder:
+        class_path: models.networks.S4DModel
+        init_args:
+           d_input: *d_input
+           d_output: *d_output
+           d_model: 18
+           n_layers: 6
+           dropout: 0.0
+           prenorm: False
+           fc_hidden: []
+    loss: MSELoss

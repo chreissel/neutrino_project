@@ -25,7 +25,7 @@ data:
     observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
     batch_size: 256
     num_workers: 1
-    path: '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_fullsim.hdf5'
+    path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
     cutoff: 8192
 
 optimizer:
