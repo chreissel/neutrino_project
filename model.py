@@ -8,7 +8,7 @@ import lightning as L
 import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
-from losses import WeightedMSELoss
+from losses import WeightedMSELoss, EfficiencyWeightedMSELoss
 
 class LitS4Model(L.LightningModule):
     def __init__(self, d_input, d_output, encoder: nn.Module, loss='MSELoss',weights=None):
@@ -22,6 +22,8 @@ class LitS4Model(L.LightningModule):
         elif self.loss=='WeightedMSELoss':
             self.weights = weights
             self.criterion = WeightedMSELoss(weights=weights)
+        elif self.loss=='EfficiencyWeightedMSELoss':
+            self.criterion = EfficiencyWeightedMSELoss()
         elif self.loss=='GaussianNLLLoss':
             self.d_split = self.d_output
             self.d_output = 2 * self.d_output
@@ -32,12 +34,14 @@ class LitS4Model(L.LightningModule):
 
         self.save_hyperparameters()
 
-    def __loss__(self, X, y):
+    def __loss__(self, X, y, w=None):
         y_preds = self.forward(X)
         if self.loss=='MSELoss':
             return self.criterion(y, y_preds)
         elif self.loss=='WeightedMSELoss':
             return self.criterion(y, y_preds)
+        elif self.loss=='EfficiencyWeightedMSELoss':
+            return self.criterion(y, y_preds, w=w)
         elif self.loss=='GaussianNLLLoss':
             y_hat, y_hat_variance = y_preds[:,:self.d_split], y_preds[:,self.d_split:]
             return self.criterion(y_hat, y, y_hat_variance)
@@ -55,8 +59,8 @@ class LitS4Model(L.LightningModule):
         return optimizer, scheduler
 
     def training_step(self, batch, batch_idx, log=True):
-        X, y, _ = batch
-        loss = self.__loss__(X, y)
+        X, y, obs, w = batch
+        loss = self.__loss__(X, y, w)
 
         if log:
             self.log("train/loss",
@@ -70,8 +74,8 @@ class LitS4Model(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx, log=True):
-        X, y, _ = batch
-        loss = self.__loss__(X, y)
+        X, y, obs, w = batch
+        loss = self.__loss__(X, y, w)
 
         #self.val_outputs.append((y.cpu().numpy(), y_hat.cpu().numpy()))
 

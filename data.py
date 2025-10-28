@@ -5,10 +5,12 @@ import numpy as np
 import torch
 from noise import *
 from utils import fft_func_IQ_abs, fft_func_IQ_complex_channels
+from EfficiencyGrid import EfficiencyGrid
 
 class Project8Sim(Dataset):
     def __init__(self, inputs, variables, observables, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', cutoff=4000, norm=True, noise_const=1,
-            apply_filter = False, apply_fft=False, complex_channels=False):
+            apply_filter = False, apply_fft=False, complex_channels=False, efficiency_grid_path="epsilon_grid.npz", thresh_idx=0):
+        
         arr = {}
         with h5py.File(path, 'r') as f:
             for i in inputs+variables+observables:
@@ -74,6 +76,14 @@ class Project8Sim(Dataset):
         self.vars = np.float32(y)
         self.obs = np.float32(obs)
 
+        eff_grid = EfficiencyGrid(efficiency_grid_path)
+        effs = np.array(
+            [eff_grid.get_efficiency(true_post=self.vars, meta=self.obs, idx=i, thresh_idx=thresh_idx)
+             for i in range(len(self.vars))],
+            dtype=np.float32)
+
+        self.weights = 1.0 / np.clip(effs, 1e-6, None)
+
     def __len__(self):
         return self.vars.shape[0]
 
@@ -81,7 +91,8 @@ class Project8Sim(Dataset):
         times = self.timeseries[idx, :, :]
         var = self.vars[idx]
         obs = self.obs[idx, :]
-        return times, var, obs
+        weights =  self.weights[idx]
+        return times, var, obs, weights
 
     def __outdim__(self):
         return self.vars.shape[1]
@@ -100,10 +111,10 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, apply_fft=False, complex_channels=False, **kwargs):
+    def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, apply_fft=False, complex_channels=False, thresh_idx=0, **kwargs):
         super().__init__(**kwargs)
        
-        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter, apply_fft, complex_channels)
+        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter, apply_fft, complex_channels, thresh_idx=thresh_idx)
         self.mu = dataset.mu
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
