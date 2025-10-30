@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/noise_fftabs_dmodel18_layers6_lr1e-3_gamma0.99/'
+  default_root_dir: 'runs/noise_fftandts2channels_dmodel18_layers6_lr1e-3_gamma0.99_batchsize256_longrun_12000points_actuallythisone/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -26,9 +26,10 @@ data:
     batch_size: 256
     num_workers: 4
     path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
-    cutoff: 8192
+    cutoff: 12000
     apply_fft: True
-    complex_channels: False
+    complex_channels: True
+    ts_and_fft: True
 
 optimizer:
   class_path: torch.optim.AdamW
@@ -43,7 +44,7 @@ lr_scheduler:
 model:
   class_path: model.LitS4Model
   init_args:
-    d_input: &d_input 1
+    d_input: &d_input 4
     d_output: &d_output 2
     encoder:
         class_path: models.networks.S4DModel
