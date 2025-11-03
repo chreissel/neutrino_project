@@ -1,7 +1,7 @@
 from torch import nn, optim
 import torch
 import torch.nn.functional as F
-from .s4d import S4D
+from .s4d import S4D, DropoutNd
 
 activations = {
     "relu": nn.ReLU(),
@@ -176,3 +176,159 @@ class S4DModel(nn.Module):
         x = self.decoder(x)  # (B, d_model) -> (B, d_output)
         return x
 
+class S4DFeatureExtractor(nn.Module):
+    def __init__(self, d_input, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[64, 32]):
+        super().__init__()
+        # Output dimension is the same as last feature vector for combination
+        self.d_output = fc_hidden[-1] if fc_hidden else d_model
+        self.prenorm = prenorm
+
+        self.encoder = nn.Linear(d_input, d_model)
+        # Stack S4 layers as residual blocks
+        self.s4_layers = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        self.dropouts = nn.ModuleList()
+        for _ in range(n_layers):
+            self.s4_layers.append(
+                S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001, 0.01))
+            )
+            self.norms.append(nn.LayerNorm(d_model))
+            self.dropouts.append(DropoutNd(dropout)) 
+            
+        self.decoder = MLP(d_model, fc_hidden, self.d_output)
+
+    def forward(self, x):
+        x = self.encoder(x)  # (B, L, d_input) -> (B, L, d_model)
+        x = x.transpose(-1, -2)  # (B, L, d_model) -> (B, d_model, L)
+        
+        for layer, norm, dropout in zip(self.s4_layers, self.norms, self.dropouts):
+            # Each iteration of this loop will map (B, d_model, L) -> (B, d_model, L)
+            z = x
+            if self.prenorm:
+                # Prenorm
+                z = norm(z.transpose(-1, -2)).transpose(-1, -2)
+            # Apply S4 block: we ignore the state input and output
+            z, _ = layer(z)
+            # Dropout on the output of the S4 block
+            z = dropout(z)
+            # Residual connection
+            x = z + x
+            if not self.prenorm:
+                # Postnorm
+                x = norm(x.transpose(-1, -2)).transpose(-1, -2)
+        x = x.transpose(-1, -2)
+        # Pooling: average pooling over the sequence length
+        x = x.mean(dim=1)
+        # Decode the outputs
+        x = self.decoder(x)  # (B, d_model) -> (B, d_output)
+        return x
+
+class S4D_CNN_Model(nn.Module):
+    def __init__(self,
+                 output_dim,
+                 d_input_ts,
+                 d_input_fft,
+                 s4d_d_model=256,
+                 s4d_n_layers=4,
+                 s4d_dropout=0.2,
+                 s4d_prenorm=False,
+                 s4d_fc_hidden=[128,64, 32],
+                 cnn_out_channels=128,
+                 cnn_hidden_channels=128,
+                 cnn_num_blocks=2,
+                 cnn_kernel_size=5,
+                 combined_fc_hidden=[128, 64]):
+        super().__init__()
+
+        self.output_dim = output_dim
+
+        self.ts_branch = S4DFeatureExtractor(
+            d_input=d_input_ts,
+            d_model=s4d_d_model,
+            n_layers=s4d_n_layers,
+            dropout=s4d_dropout,
+            prenorm=s4d_prenorm,
+            fc_hidden=s4d_fc_hidden
+        )
+        self.ts_output_dim = self.ts_branch.d_output
+
+        self.fft_branch = ConvResidualNet(
+            d_input=d_input_fft,
+            d_output=cnn_out_channels,
+            out_channels=cnn_out_channels,
+            hidden_channels=cnn_hidden_channels,
+            num_blocks=cnn_num_blocks,
+            kernel_size=cnn_kernel_size,
+            dropout_probability=s4d_dropout
+        )
+        self.fft_output_dim = self.fft_branch.decoder.out_features
+
+        combined_input_dim = self.ts_output_dim + self.fft_output_dim
+        self.final_mlp = MLP(
+            input_dim=combined_input_dim,
+            hidden_dims=combined_fc_hidden,
+            output_dim=output_dim,
+            dropout=s4d_dropout
+        )
+
+    def forward(self, ts_input, fft_input):
+        ts_features = self.ts_branch(ts_input)
+        fft_features = self.fft_branch(fft_input)
+        combined = torch.cat([ts_features, fft_features], dim=-1)
+        output = self.final_mlp(combined)
+        return output
+
+class S4D_S4D_Model(nn.Module):
+    def __init__(self,
+                 output_dim,
+                 d_input_ts,
+                 d_input_fft,
+                 s4d_ts_d_model=256,
+                 s4d_ts_n_layers=4,
+                 s4d_ts_dropout=0.2,
+                 s4d_ts_prenorm=False,
+                 s4d_ts_fc_hidden=[128,64, 32],
+                 s4d_fft_d_model=256,
+                 s4d_fft_n_layers=4,
+                 s4d_fft_dropout=0.2,
+                 s4d_fft_prenorm=False,
+                 s4d_fft_fc_hidden=[128,64, 32],
+                 combined_fc_hidden=[128, 64]):
+        super().__init__()
+
+        self.output_dim = output_dim
+
+        self.ts_branch = S4DFeatureExtractor(
+            d_input=d_input_ts,
+            d_model=s4d_ts_d_model,
+            n_layers=s4d_ts_n_layers,
+            dropout=s4d_ts_dropout,
+            prenorm=s4d_ts_prenorm,
+            fc_hidden=s4d_ts_fc_hidden
+        )
+        self.ts_output_dim = self.ts_branch.d_output
+
+        self.fft_branch = S4DFeatureExtractor(
+            d_input=d_input_fft,
+            d_model=s4d_fft_d_model,
+            n_layers=s4d_fft_n_layers,
+            dropout=s4d_fft_dropout,
+            prenorm=s4d_fft_prenorm,
+            fc_hidden=s4d_fft_fc_hidden
+        )
+        self.fft_output_dim = self.fft_branch.decoder.out_features
+
+        combined_input_dim = self.ts_output_dim + self.fft_output_dim
+        self.final_mlp = MLP(
+            input_dim=combined_input_dim,
+            hidden_dims=combined_fc_hidden,
+            output_dim=output_dim,
+            dropout=s4d_dropout
+        )
+
+    def forward(self, ts_input, fft_input):
+        ts_features = self.ts_branch(ts_input)
+        fft_features = self.fft_branch(fft_input)
+        combined = torch.cat([ts_features, fft_features], dim=-1)
+        output = self.final_mlp(combined)
+        return output

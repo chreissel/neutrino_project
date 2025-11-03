@@ -4,11 +4,11 @@ import h5py
 import numpy as np
 import torch
 from noise import *
-from utils import fft_func_IQ_abs, fft_func_IQ_complex_channels
+from utils import fft_func_IQ_complex_channels
 
 class Project8Sim(Dataset):
     def __init__(self, inputs, variables, observables, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', cutoff=4000, norm=True, noise_const=1,
-            apply_filter = False, apply_fft=False, complex_channels=False, ts_and_fft=False):
+            apply_filter = False):
         arr = {}
         with h5py.File(path, 'r') as f:
             for i in inputs+variables+observables:
@@ -21,7 +21,8 @@ class Project8Sim(Dataset):
         obs = np.concatenate([arr[o] for o in observables], axis = 1)
         # add noise and normalize by std
 
-        X_ts = np.zeros_like(X)
+        X_ts = np.copy(X)
+
         for i in range(X.shape[0]):
             for j in range(X.shape[2]):
                 noise_arr = noise_model(cutoff, noise_const)
@@ -35,35 +36,17 @@ class Project8Sim(Dataset):
                 X_ts[i, :, j] = X_noise / std_X
 
         X_fft = None
-        if apply_fft or ts_and_fft:
-            if ('output_ts_I' in inputs) and ('output_ts_Q' in inputs):
-                index_ts_I = inputs.index('output_ts_I')
-                index_ts_Q = inputs.index('output_ts_Q')
-                X_fft = np.zeros_like(X_ts)
-
-                for i in range(X.shape[0]):
-                    if complex_channels:
-                        real_part, imag_part = fft_func_IQ_complex_channels(
+        if ('output_ts_I' in inputs) and ('output_ts_Q' in inputs):
+            index_ts_I = inputs.index('output_ts_I')
+            index_ts_Q = inputs.index('output_ts_Q')
+            X_fft = np.zeros_like(X_ts)
+            for i in range(X.shape[0]):
+                real_part, imag_part = fft_func_IQ_complex_channels(
                             X_ts[i, :, index_ts_I],
                             X_ts[i, :, index_ts_Q]
-                        )
-                        X_fft[i, :, index_ts_I] = real_part
-                        X_fft[i, :, index_ts_Q] = imag_part
-                    else:
-                        abs_fft = fft_func_IQ_abs(
-                            X_ts[i, :, index_ts_I],
-                            X_ts[i, :, index_ts_Q]
-                        )
-                        X_fft[i, :, 0] = abs_fft
-                if not complex_channels:
-                    X_fft = X_fft[:, :, [0]]
-
-        if ts_and_fft:
-            X = np.concatenate([X_ts, X_fft], axis=2)
-        elif apply_fft:
-            X = X_fft
-        else:
-            X = X_ts
+                    )
+                X_fft[i, :, index_ts_I] = real_part
+                X_fft[i, :, index_ts_Q] = imag_part
 
         if norm:
             mu_y = np.mean(y, axis=0)
@@ -72,7 +55,8 @@ class Project8Sim(Dataset):
 
         self.mu = mu_y
         self.stds = stds_y
-        self.timeseries = np.float32(X)
+        self.timeseries = np.float32(X_ts)
+        self.fft_data = np.float32(X_fft)
         self.vars = np.float32(y)
         self.obs = np.float32(obs)
 
@@ -81,15 +65,19 @@ class Project8Sim(Dataset):
 
     def __getitem__(self, idx):
         times = self.timeseries[idx, :, :]
+        fft = self.fft_data[idx,:,:]
         var = self.vars[idx]
         obs = self.obs[idx, :]
-        return times, var, obs
+        return times, fft, var, obs
 
     def __outdim__(self):
         return self.vars.shape[1]
 
-    def __indim__(self):
-        return self.timeseries.shape[1]
+    def __indim_ts__(self):
+        return self.timeseries.shape[2]
+
+    def __indim_fft__(self):
+        return self.fft_data.shape[2]
 
 class GenericDataModule(L.LightningDataModule):
     def __init__(self,batch_size=512,num_workers=4,pin_memory=False):
@@ -102,16 +90,18 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, apply_fft=False, complex_channels=False, ts_and_fft=False, **kwargs):
+    def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, **kwargs):
         super().__init__(**kwargs)
        
-        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter, apply_fft, complex_channels, ts_and_fft)
+        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter)
         self.mu = dataset.mu
         self.stds = dataset.stds
         generator = torch.Generator().manual_seed(42)
         self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [0.8,0.1,0.1], generator=generator)
         self.observables = observables
         self.variables = variables
+        self.input_channels_ts = dataset.__indim_ts__()
+        self.input_channels_fft = dataset.__indim_fft__()
         self.save_hyperparameters()
 
     def train_dataloader(self):

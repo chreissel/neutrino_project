@@ -85,3 +85,84 @@ class LitS4Model(L.LightningModule):
                     prog_bar=True)
 
         return loss
+
+class LitS4_CNNModel(L.LightningModule):
+    def __init__(self, encoder: nn.Module, learning_rate=1e-3, weight_decay=0.0, gamma=0.99, loss='MSELoss', weights=None):
+        super().__init__()
+       
+        self.encoder = encoder
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.gamma = gamma
+        self.loss = loss
+        self.d_output = self.encoder.output_dim
+        if self.loss=='MSELoss':
+            self.criterion = nn.MSELoss()
+        elif self.loss=='WeightedMSELoss':
+            self.weights = weights
+            self.criterion = WeightedMSELoss(weights=weights)
+        else: raise ValueError(f'Unknown loss function {self.loss}')
+        
+        self.val_outputs = []
+
+        self.save_hyperparameters()
+
+    def __loss__(self, ts_input, fft_input, y):
+        y_preds = self.forward(ts_input, fft_input)
+        y = y.squeeze(-1) 
+        y_preds = y_preds.squeeze(-1)
+        if self.loss=='MSELoss':
+            return self.criterion(y, y_preds)
+        elif self.loss=='WeightedMSELoss':
+            return self.criterion(y, y_preds)
+
+    def forward(self, ts_input, fft_input):
+        x = self.encoder(ts_input, fft_input)  
+        return x
+
+    def configure_optimizers(self):
+        #optimizer = optim.AdamW(self.parameters(), lr=0.01)
+        #scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
+        #return optimizer, scheduler
+        p_wd, p_non_wd, optim_params = [], [], []
+        
+        for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
+            
+            if hasattr(param, "_optim"):
+                optim_dict = param._optim
+                group = {"params": [param]}
+                
+                if "lr" in optim_dict:
+                    group["lr"] = optim_dict["lr"]
+                if "weight_decay" in optim_dict:
+                    group["weight_decay"] = optim_dict["weight_decay"]
+                
+                optim_params.append(group)
+                continue
+
+            if param.ndim == 1:
+                p_non_wd.append(param)
+            else:
+                p_wd.append(param)
+        
+        optim_params.extend([
+            {"params": p_wd, "weight_decay": self.weight_decay, "lr": self.learning_rate},
+            {"params": p_non_wd, "weight_decay": 0.0, "lr": self.learning_rate},
+        ])
+        optimizer = optim.AdamW(optim_params, lr=self.learning_rate, weight_decay=self.weight_decay)
+        scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.gamma)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+
+    def training_step(self, batch, batch_idx, log=True):
+        ts_input, fft_input, y, _ = batch
+        loss = self.__loss__(ts_input, fft_input, y)
+        self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx, log=True):
+        ts_input, fft_input, y, _ = batch
+        loss = self.__loss__(ts_input, fft_input, y)
+        self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
