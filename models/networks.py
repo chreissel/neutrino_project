@@ -316,14 +316,14 @@ class S4D_S4D_Model(nn.Module):
             prenorm=s4d_fft_prenorm,
             fc_hidden=s4d_fft_fc_hidden
         )
-        self.fft_output_dim = self.fft_branch.decoder.out_features
+        self.fft_output_dim = self.fft_branch.d_output
 
         combined_input_dim = self.ts_output_dim + self.fft_output_dim
         self.final_mlp = MLP(
             input_dim=combined_input_dim,
             hidden_dims=combined_fc_hidden,
             output_dim=output_dim,
-            dropout=s4d_dropout
+            dropout=s4d_ts_dropout
         )
 
     def forward(self, ts_input, fft_input):
