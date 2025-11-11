@@ -9,65 +9,73 @@ from utils import fft_func_IQ_complex_channels
 class Project8Sim(Dataset):
     def __init__(self, inputs, variables, observables, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', cutoff=4000, norm=True, noise_const=1,
             apply_filter = False):
+
         arr = {}
         with h5py.File(path, 'r') as f:
             for i in inputs+variables+observables:
-                #arr[i] = f[i][:100]
                 arr[i] = f[i][:]
                 arr[i] = arr[i][:, np.newaxis]
-        X = np.concatenate([arr[i] for i in inputs], axis = 1)
-        X = np.swapaxes(X,1,2)[:,:cutoff, :]
-        y = np.concatenate([arr[v] for v in variables], axis = 1)
-        obs = np.concatenate([arr[o] for o in observables], axis = 1)
-        # add noise and normalize by std
 
-        X_ts = np.copy(X)
+        X_original = np.concatenate([arr[i] for i in inputs], axis = 1)
+        self.X_original = np.swapaxes(X_original,1,2)[:,:cutoff, :]
+        self.y_original = np.concatenate([arr[v] for v in variables], axis = 1)
+        self.obs = np.concatenate([arr[o] for o in observables], axis = 1)
 
-        for i in range(X.shape[0]):
-            for j in range(X.shape[2]):
-                noise_arr = noise_model(cutoff, noise_const)
-                X_noise = X[i, :, j] + noise_arr
-                if apply_filter:
+        self.inputs = inputs
+        self.cutoff = cutoff
+        self.norm = norm
+        self.apply_filter = apply_filter
+        self.noise_const = noise_const
+
+        if norm:
+            self.mu = np.mean(self.y_original, axis=0)
+            self.stds = np.std(self.y_original, axis=0)
+            self.vars = (self.y_original - self.mu) / self.stds
+        else:
+            self.mu = np.zeros_like(self.y_original[0])
+            self.stds = np.ones_like(self.y_original[0])
+            self.vars = self.y_original
+
+        self.generate_noisy_data()
+
+    def generate_noisy_data(self):
+        X_ts = np.copy(self.X_original)
+        for i in range(self.X_original.shape[0]):
+            for j in range(self.X_original.shape[2]):
+                noise_arr = noise_model(self.cutoff, self.noise_const)
+                X_noise = self.X_original[i, :, j] + noise_arr
+
+                if self.apply_filter:
                     X_noise = bandpass_filter(X_noise)
-                if norm:
-                    std_X = np.std(X_noise)
-                else:
-                    std_X = 1
-                X_ts[i, :, j] = X_noise / std_X
 
+                std_X = np.std(X_noise) if self.norm else 1
+                X_ts[i, :, j] = X_noise / std_X
+       
         X_fft = None
-        if ('output_ts_I' in inputs) and ('output_ts_Q' in inputs):
-            index_ts_I = inputs.index('output_ts_I')
-            index_ts_Q = inputs.index('output_ts_Q')
+        if ('output_ts_I' in self.inputs) and ('output_ts_Q' in self.inputs):
+            index_ts_I = self.inputs.index('output_ts_I')
+            index_ts_Q = self.inputs.index('output_ts_Q')
             X_fft = np.zeros_like(X_ts)
-            for i in range(X.shape[0]):
+
+            for i in range(X_ts.shape[0]):
                 real_part, imag_part = fft_func_IQ_complex_channels(
                             X_ts[i, :, index_ts_I],
-                            X_ts[i, :, index_ts_Q]
+                            X_ts[i, :, index_ts_Q] 
                     )
                 X_fft[i, :, index_ts_I] = real_part
                 X_fft[i, :, index_ts_Q] = imag_part
 
-        if norm:
-            mu_y = np.mean(y, axis=0)
-            stds_y = np.std(y, axis=0)
-            y = (y - mu_y) / stds_y
-
-        self.mu = mu_y
-        self.stds = stds_y
         self.timeseries = np.float32(X_ts)
         self.fft_data = np.float32(X_fft)
-        self.vars = np.float32(y)
-        self.obs = np.float32(obs)
 
     def __len__(self):
         return self.vars.shape[0]
 
     def __getitem__(self, idx):
-        times = self.timeseries[idx, :, :]
-        fft = self.fft_data[idx,:,:]
-        var = self.vars[idx]
-        obs = self.obs[idx, :]
+        times = torch.tensor(self.timeseries[idx,:,:], dtype=torch.float32)
+        fft = torch.tensor(self.fft_data[idx,:,:], dtype=torch.float32)
+        var = torch.tensor(self.vars[idx], dtype=torch.float32)
+        obs = torch.tensor(self.obs[idx,:], dtype=torch.float32)
         return times, fft, var, obs
 
     def __outdim__(self):
@@ -90,19 +98,32 @@ class GenericDataModule(L.LightningDataModule):
                               "pin_memory":self.pin_memory}
 
 class LitDataModule(GenericDataModule):
-    def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, **kwargs):
+    def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, 
+            use_curriculum_learning=False, max_noise_const=1.0, **kwargs):
         super().__init__(**kwargs)
-       
-        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, noise_const, apply_filter)
-        self.mu = dataset.mu
-        self.stds = dataset.stds
+        if use_curriculum_learning:
+            initial_noise_const = 0.0
+            self.max_noise_const = max_noise_const
+        else:
+            initial_noise_const = noise_const
+
+        self.use_curriculum_learning = use_curriculum_learning
+        dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, initial_noise_const, apply_filter)
+        self.dataset = dataset
+        self.mu = self.dataset.mu
+        self.stds = self.dataset.stds
         generator = torch.Generator().manual_seed(42)
-        self.train_dataset, self.val_dataset, self.test_dataset = random_split(dataset, [0.8,0.1,0.1], generator=generator)
+        self.train_dataset, self.val_dataset, self.test_dataset = random_split(self.dataset, [0.8,0.1,0.1], generator=generator)
         self.observables = observables
         self.variables = variables
-        self.input_channels_ts = dataset.__indim_ts__()
-        self.input_channels_fft = dataset.__indim_fft__()
-        self.save_hyperparameters()
+        self.input_channels_ts = self.dataset.__indim_ts__()
+        self.input_channels_fft = self.dataset.__indim_fft__()
+        self.save_hyperparameters(ignore=['use_curriculum_learning'])
+
+    def set_noise_const(self, new_const):
+        if self.use_curriculum_learning:
+            self.dataset.noise_const = new_const
+            self.dataset.generate_noisy_data()
 
     def train_dataloader(self):
         loader = DataLoader(self.train_dataset,shuffle=True, **self.loader_kwargs)
