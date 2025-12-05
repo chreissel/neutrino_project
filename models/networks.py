@@ -15,6 +15,19 @@ activations = {
     "mish": nn.Mish()
 }
 
+class GatedFusionLayer(nn.Module):
+    def __init__(self, feature_dim):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.input_dim = 2 * feature_dim
+        self.gate_fc = nn.Linear(self.input_dim, self.feature_dim)
+        
+    def forward(self, f_ts, f_fft) -> torch.Tensor:
+        f_combined = torch.cat([f_ts, f_fft], dim=1) 
+        G = torch.sigmoid(self.gate_fc(f_combined))
+        f_fused = (G * f_ts) + ((1 - G) * f_fft)
+        return f_fused
+
 class ConvResidualBlock(nn.Module):
     def __init__(
         self,
@@ -280,9 +293,9 @@ class S4D_CNN_Model(nn.Module):
 
 class S4D_S4D_Model(nn.Module):
     def __init__(self,
-                 output_dim,
-                 d_input_ts,
-                 d_input_fft,
+                 output_dim=2,
+                 d_input_ts=2,
+                 d_input_fft=2,
                  s4d_ts_d_model=256,
                  s4d_ts_n_layers=4,
                  s4d_ts_dropout=0.2,
@@ -293,7 +306,9 @@ class S4D_S4D_Model(nn.Module):
                  s4d_fft_dropout=0.2,
                  s4d_fft_prenorm=False,
                  s4d_fft_fc_hidden=[128,64, 32],
-                 combined_fc_hidden=[128, 64]):
+                 combined_fc_hidden=[128, 64],
+                 ts_ckpt_path=None,
+                 fft_ckpt_path=None):
         super().__init__()
 
         self.output_dim = output_dim
@@ -326,9 +341,124 @@ class S4D_S4D_Model(nn.Module):
             dropout=s4d_ts_dropout
         )
 
+        self._load_branch_weights(self.ts_branch, ts_ckpt_path, self.output_dim)
+        self._load_branch_weights(self.fft_branch, fft_ckpt_path, self.output_dim)
+
+    def _load_branch_weights(self, branch_module, ckpt_path, output_dim):
+        if ckpt_path is None:
+            return
+
+        checkpoint = torch.load(ckpt_path, map_location='cpu')
+        state_dict = checkpoint['state_dict']
+        branch_state = {}
+            
+        for k, v in state_dict.items():
+            if k.startswith('encoder.'):
+                new_key = k.replace('encoder.', '')
+                    
+                # Skip final layer that reduces the models to ouput_dim
+                if 'weight' in k and v.shape[0] == output_dim:
+                    continue
+                if 'bias' in k and v.shape[0] == output_dim:
+                    continue
+                    
+                branch_state[new_key] = v
+                        
+        missing_keys, unexpected_keys = branch_module.load_state_dict(branch_state, strict=False)
+
     def forward(self, ts_input, fft_input):
         ts_features = self.ts_branch(ts_input)
         fft_features = self.fft_branch(fft_input)
         combined = torch.cat([ts_features, fft_features], dim=-1)
         output = self.final_mlp(combined)
+        return output
+
+class S4D_S4D_GatedModel(nn.Module):
+    def __init__(self,
+                 output_dim=2,
+                 d_input_ts=2,
+                 d_input_fft=2,
+                 s4d_ts_d_model=18,
+                 s4d_ts_n_layers=6,
+                 s4d_ts_dropout=0.0,
+                 s4d_ts_fc_hidden=[],
+                 s4d_fft_d_model=18,
+                 s4d_fft_n_layers=6,
+                 s4d_fft_dropout=0.0,
+                 s4d_fft_fc_hidden=[],
+                 combined_fc_hidden=[128,64],
+                 ts_ckpt_path=None,
+                 fft_ckpt_path=None):
+        super().__init__()
+        
+        self.output_dim = output_dim
+
+        self.ts_branch = S4DFeatureExtractor(
+            d_input=d_input_ts, 
+            d_model=s4d_ts_d_model, 
+            n_layers=s4d_ts_n_layers, 
+            dropout=s4d_ts_dropout, 
+            fc_hidden=s4d_ts_fc_hidden
+        )
+
+        self.ts_output_dim = self.ts_branch.d_output
+
+        self.fft_branch = S4DFeatureExtractor(
+            d_input=d_input_fft,
+            d_model=s4d_fft_d_model, 
+            n_layers=s4d_fft_n_layers,
+            dropout=s4d_fft_dropout,
+            fc_hidden=s4d_fft_fc_hidden
+        )
+
+        self.fft_output_dim = self.fft_branch.d_output
+
+        if self.ts_output_dim != self.fft_output_dim:
+            self.ts_align_layer = nn.Linear(self.ts_output_dim, self.fft_output_dim)
+            final_feature_dim = self.fft_output_dim
+        else:
+            self.ts_align_layer = nn.Identity()
+            final_feature_dim = self.ts_output_dim
+        
+        self.gated_fusion_layer = GatedFusionLayer(feature_dim=final_feature_dim)
+        final_mlp_input_dim = final_feature_dim
+        layers = []
+        current_dim = final_mlp_input_dim
+
+        self.final_mlp = MLP(
+            input_dim=final_mlp_input_dim,
+            hidden_dims=combined_fc_hidden,
+            output_dim=output_dim,
+            dropout=s4d_ts_dropout
+        )
+
+        self._load_branch_weights(self.ts_branch, ts_ckpt_path, self.output_dim)
+        self._load_branch_weights(self.fft_branch, fft_ckpt_path, self.output_dim)
+
+    def _load_branch_weights(self, branch_module, ckpt_path, output_dim):
+        if ckpt_path is None:
+            return
+
+        checkpoint = torch.load(ckpt_path, map_location='cpu')
+        state_dict = checkpoint['state_dict']
+        branch_state = {}
+
+        for k, v in state_dict.items():
+            if k.startswith('encoder.'):
+                new_key = k.replace('encoder.', '')
+                # Skip final layer that reduces the models to ouput_dim
+                if 'weight' in k and v.shape[0] == output_dim:
+                    continue
+                if 'bias' in k and v.shape[0] == output_dim:
+                    continue
+                
+                branch_state[new_key] = v
+        missing_keys, unexpected_keys = branch_module.load_state_dict(branch_state, strict=False)
+    
+    def forward(self, ts_input, fft_input):
+        f_ts = self.ts_branch(ts_input)
+        f_ts_aligned = self.ts_align_layer(f_ts)
+        f_fft = self.fft_branch(fft_input)
+        f_fused = self.gated_fusion_layer(f_ts=f_ts_aligned, f_fft=f_fft)
+        output = self.final_mlp(f_fused)
         return output

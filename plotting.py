@@ -258,7 +258,7 @@ def make_energy_res(variables, observables, true, pred, meta):
         ax[0, vind].fill_between(var_bins, np.ones(len(var_bins))*-0.3, np.ones(len(var_bins))*0.3, alpha=0.5, label="0.3 eV std")
         ax[0, vind].legend()
         ax[0, vind].set_xlim(min(var_bins), max(var_bins))
-        ax[0, vind].set_ylim(-1,1)
+        ax[0, vind].set_ylim(-5,5)
         ax[0, vind].set_xlabel('true ' + var_label + ' ['+var_unit+']')
         ax[0, vind].set_ylabel('true-pred energy [eV]')
         

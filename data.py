@@ -36,56 +36,54 @@ class Project8Sim(Dataset):
             self.stds = np.ones_like(self.y_original[0])
             self.vars = self.y_original
 
-        self.generate_noisy_data()
+    def __getitem__(self,idx):
+        X_clean = self.X_original[idx].copy()
+        X_ts = X_clean.copy()
 
-    def generate_noisy_data(self):
-        X_ts = np.copy(self.X_original)
-        for i in range(self.X_original.shape[0]):
-            for j in range(self.X_original.shape[2]):
-                noise_arr = noise_model(self.cutoff, self.noise_const)
-                X_noise = self.X_original[i, :, j] + noise_arr
+        for j in range(X_ts.shape[1]):
+            noise_arr = noise_model(self.cutoff, self.noise_const)
+            X_noise = X_clean[:, j] + noise_arr
 
-                if self.apply_filter:
-                    X_noise = bandpass_filter(X_noise)
+            if self.apply_filter:
+                X_noise = bandpass_filter(X_noise)
 
-                std_X = np.std(X_noise) if self.norm else 1
-                X_ts[i, :, j] = X_noise / std_X
+            std_X = np.std(X_noise) if self.norm else 1
+            X_ts[:, j] = X_noise / std_X
        
-        X_fft = None
-        if ('output_ts_I' in self.inputs) and ('output_ts_Q' in self.inputs):
-            index_ts_I = self.inputs.index('output_ts_I')
-            index_ts_Q = self.inputs.index('output_ts_Q')
-            X_fft = np.zeros_like(X_ts)
+        index_ts_I = self.inputs.index('output_ts_I')
+        index_ts_Q = self.inputs.index('output_ts_Q')
+        X_fft = np.zeros_like(X_ts)
 
-            for i in range(X_ts.shape[0]):
-                real_part, imag_part = fft_func_IQ_complex_channels(
-                            X_ts[i, :, index_ts_I],
-                            X_ts[i, :, index_ts_Q] 
-                    )
-                X_fft[i, :, index_ts_I] = real_part
-                X_fft[i, :, index_ts_Q] = imag_part
+        real_part, imag_part = fft_func_IQ_complex_channels(
+                    X_ts[:, index_ts_I],
+                    X_ts[:, index_ts_Q] 
+            )
+                
+        fft_case_data = np.stack([real_part, imag_part], axis=1)
+        mu_fft_case = np.mean(fft_case_data, axis=0)
+        stds_fft_case = np.std(fft_case_data, axis=0)
+        real_part_norm = (real_part - mu_fft_case[0]) / stds_fft_case[0]
+        imag_part_norm = (imag_part - mu_fft_case[1]) / stds_fft_case[1]
+        X_fft[:, index_ts_I] = real_part_norm
+        X_fft[:, index_ts_Q] = imag_part_norm
 
-        self.timeseries = np.float32(X_ts)
-        self.fft_data = np.float32(X_fft)
+        ts = torch.tensor(X_ts, dtype=torch.float32)
+        fft = torch.tensor(X_fft, dtype=torch.float32)
+        var = torch.tensor(self.vars[idx], dtype=torch.float32)
+        obs = torch.tensor(self.obs[idx,:], dtype=torch.float32)
+        return ts, fft, var, obs
+
+    def outdim(self):
+        return self.vars.shape[1]
 
     def __len__(self):
         return self.vars.shape[0]
 
-    def __getitem__(self, idx):
-        times = torch.tensor(self.timeseries[idx,:,:], dtype=torch.float32)
-        fft = torch.tensor(self.fft_data[idx,:,:], dtype=torch.float32)
-        var = torch.tensor(self.vars[idx], dtype=torch.float32)
-        obs = torch.tensor(self.obs[idx,:], dtype=torch.float32)
-        return times, fft, var, obs
-
-    def __outdim__(self):
-        return self.vars.shape[1]
-
     def __indim_ts__(self):
-        return self.timeseries.shape[2]
+        return self.X_original.shape[2]
 
     def __indim_fft__(self):
-        return self.fft_data.shape[2]
+        return self.X_original.shape[2]
 
 class GenericDataModule(L.LightningDataModule):
     def __init__(self,batch_size=512,num_workers=4,pin_memory=False):
@@ -101,13 +99,10 @@ class LitDataModule(GenericDataModule):
     def __init__(self, inputs, variables, observables, cutoff=4000, path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', norm=True, noise_const=1, apply_filter=False, 
             use_curriculum_learning=False, max_noise_const=1.0, **kwargs):
         super().__init__(**kwargs)
-        if use_curriculum_learning:
-            initial_noise_const = 0.0
-            self.max_noise_const = max_noise_const
-        else:
-            initial_noise_const = noise_const
-
+        
+        initial_noise_const = noise_const
         self.use_curriculum_learning = use_curriculum_learning
+
         dataset = Project8Sim(inputs, variables, observables, path, cutoff, norm, initial_noise_const, apply_filter)
         self.dataset = dataset
         self.mu = self.dataset.mu
@@ -123,7 +118,6 @@ class LitDataModule(GenericDataModule):
     def set_noise_const(self, new_const):
         if self.use_curriculum_learning:
             self.dataset.noise_const = new_const
-            self.dataset.generate_noisy_data()
 
     def train_dataloader(self):
         loader = DataLoader(self.train_dataset,shuffle=True, **self.loader_kwargs)
