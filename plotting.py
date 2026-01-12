@@ -161,7 +161,7 @@ def make_res(variables, true, pred):
         pred_var = pred[:, vind]
         diff = (true_var-pred_var)/diff_factor
         
-        hist, bins, _ = ax[0, vind].hist(diff,bins=np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 500),weights=np.ones(len(true_var))*1/float(len(true_var)))
+        hist, bins, _ = ax[0, vind].hist(diff,bins=np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 2500),weights=np.ones(len(true_var))*1/float(len(true_var)))
         bincenters = (bins[:-1] + bins[1:]) / 2
         popt, pcov = curve_fit(gaussian, bincenters, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
         amplitude_fit, mean_fit, stddev_fit = popt
@@ -231,7 +231,7 @@ def make_energy_res(variables, observables, true, pred, meta):
                 popt, pcov = curve_fit(gaussian, bincenters_g, hist, p0=[max(hist), np.mean(energy_diff), np.std(energy_diff)])
                 amplitude_fit, mean_fit, stddev_fit = popt
                 means.append(mean_fit)
-                stds.append(stddev_fit)
+                stds.append(np.abs(stddev_fit))   # added absolute value
                 lens.append(len(energy_diff))
             except:
                 means.append(np.nan)

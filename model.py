@@ -81,7 +81,7 @@ class BaseS4LightningModule(L.LightningModule):
         Configures the optimizer and selected LR scheduler based on self.lr_schedule_type.
         """
         p_wd, p_non_wd, optim_params = [], [], []
-
+        learning_rate = self.hparams.learning_rate
         for name, param in self.named_parameters():
             if not param.requires_grad:
                 continue
@@ -98,11 +98,11 @@ class BaseS4LightningModule(L.LightningModule):
                 p_wd.append(param)
         
         optim_params.extend([
-            {"params": p_wd, "weight_decay": self.weight_decay, "lr": self.learning_rate},
-            {"params": p_non_wd, "weight_decay": 0.0, "lr": self.learning_rate},
+            {"params": p_wd, "weight_decay": self.weight_decay, "lr": learning_rate},
+            {"params": p_non_wd, "weight_decay": 0.0, "lr": learning_rate},
         ])
         
-        optimizer = optim.AdamW(optim_params, lr=self.learning_rate, weight_decay=self.weight_decay)
+        optimizer = optim.AdamW(optim_params, lr=learning_rate, weight_decay=self.weight_decay)
         if self.lr_schedule_type == 'reduce_on_plateau':
             scheduler = ReduceLROnPlateau(
                 optimizer, 
