@@ -1,0 +1,64 @@
+trainer:
+  accelerator: auto
+  default_root_dir: 'runs/s4d_s4d_test_CL/'
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        patience: 100
+        mode: min
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+  log_every_n_steps: 1
+  max_epochs: 120
+
+data:
+  class_path: data.LitDataModule
+  init_args:
+    inputs: ['output_ts_I', 'output_ts_Q']
+    variables: ['energy_eV', 'pitch_angle_deg']
+    observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
+    batch_size: 256
+    num_workers: 4
+    path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
+    cutoff: 8192
+    noise_const: 1.0
+    use_curriculum_learning: True
+    max_noise_const: 1.0
+
+model:
+  class_path: model.LitS4_CNNModel
+  init_args:
+    trainer_max_epochs: 35
+    use_curriculum_learning: ${data.init_args.use_curriculum_learning}
+    max_noise_const: 1.0
+    noise_schedule_type: root
+    learning_rate: 1e-3
+    gamma: 0.99
+    loss: 'MSELoss'
+    encoder:
+      class_path: models.networks.S4D_S4D_Model
+      init_args:
+        output_dim: &d_output 2 
+        d_input_ts: 2
+        d_input_fft: 2
+        # S4D Branch
+        s4d_ts_d_model: 28
+        s4d_ts_n_layers: 6
+        s4d_ts_dropout: 0.0
+        s4d_ts_fc_hidden: [128]
+
+        # S4D Branch (FFT)
+        s4d_fft_d_model: 28
+        s4d_fft_n_layers: 6
+        s4d_fft_dropout: 0.0
+        s4d_fft_fc_hidden: [128]
+
+        # Fusion MLP
+        combined_fc_hidden: [256, 128, 64]
+

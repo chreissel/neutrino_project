@@ -1,56 +1,53 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/noise/'
+  default_root_dir: 'runs/s4d_fft_dmodel128_layers6_lr1e-3_ROP_batchsize256_normfft_best'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: val/loss
         mode: min
+        save_top_k: 1
         save_last: true
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: val/loss
-        patience: 5
+        patience: 10
         mode: min
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 3
+  max_epochs: 80
 
 data:
   class_path: data.LitDataModule
   init_args:
     inputs: ['output_ts_I', 'output_ts_Q']
     variables: ['energy_eV', 'pitch_angle_deg']
-    observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
-    batch_size: 256
-    num_workers: 1
+    observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz','radius_m']
+    batch_size: 128
+    num_workers: 4
     path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
     cutoff: 8192
+    noise_const: 1.0
 
-optimizer:
-  class_path: torch.optim.AdamW
-  init_args:
-    lr: 1e-3
-
-lr_scheduler:
-  class_path: torch.optim.lr_scheduler.ExponentialLR
-  init_args:
-    gamma: 0.75
-    
 model:
   class_path: model.LitS4Model
   init_args:
-    d_input: &d_input 2
-    d_output: &d_output 2
+    apply_fft: True
+    learning_rate: 1e-3
+    lr_schedule_type: reduce_on_plateau
+    gamma: 0.25
+    lr_patience: 5
+    threshold: 1e-3
+    lr_min: 1e-6
+    loss: 'MSELoss'
     encoder:
-        class_path: models.networks.S4DModel
-        init_args:
-           d_input: *d_input
-           d_output: *d_output
-           d_model: 10
-           n_layers: 6
-           dropout: 0.0
-           prenorm: False
-           fc_hidden: [512, 256, 128]
-
+      class_path: models.networks.S4DModel
+      init_args:
+        d_input: 2
+        d_output: 2
+        d_model: 128
+        n_layers: 6
+        dropout: 0.0
+        prenorm: False
+        fc_hidden: []
