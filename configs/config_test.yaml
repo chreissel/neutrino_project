@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/s4d_fft_dmodel128_layers6_lr1e-3_ROP_batchsize128_normfft_best'
+  default_root_dir: 'runs/test/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -16,10 +16,11 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 80
+  fast_dev_run: true
+  max_epochs: 3
 
 data:
-  class_path: data.LitDataModule
+  class_path: src.data.data.LitDataModule
   init_args:
     inputs: ['output_ts_I', 'output_ts_Q']
     variables: ['energy_eV', 'pitch_angle_deg']
@@ -31,7 +32,7 @@ data:
     noise_const: 1.0
 
 model:
-  class_path: model.LitS4Model
+  class_path: src.models.model.LitS4Model
   init_args:
     apply_fft: True
     learning_rate: 1e-3
@@ -40,13 +41,13 @@ model:
     lr_patience: 5
     threshold: 1e-3
     lr_min: 1e-6
-    loss: 'MSELoss'
+    loss: 'GaussianNLLLoss'
     encoder:
-      class_path: models.networks.S4DModel
+      class_path: src.models.networks.S4DModel
       init_args:
         d_input: 2
         d_output: 2
-        d_model: 128
+        d_model: 10
         n_layers: 6
         dropout: 0.0
         prenorm: False

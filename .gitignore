@@ -1,2 +1,6 @@
 *.npz
 *.npy
+__pycache__
+runs/
+slurm_logs/
+.ipynb_checkpoints/

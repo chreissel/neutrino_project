@@ -1,7 +1,7 @@
 from torch import nn, optim
 import torch
 import torch.nn.functional as F
-from .s4d import S4D, DropoutNd
+from src.models.s4d import S4D, DropoutNd
 
 activations = {
     "relu": nn.ReLU(),

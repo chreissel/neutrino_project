@@ -1,5 +1,5 @@
-from models.s4d import S4D
-from models.networks import S4DModel
+from src.models.s4d import S4D
+from src.models.networks import S4DModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,12 +8,12 @@ import lightning as L
 import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
-from losses import WeightedMSELoss
-from models.curriculum_scheduler import NoiseScheduler
-from data import LitDataModule
+from src.models.losses import WeightedMSELoss
+from src.models.curriculum_scheduler import NoiseScheduler
+from src.data.data import LitDataModule
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, CosineAnnealingLR
 
-class BaseS4LightningModule(L.LightningModule):
+class BaseLightningModule(L.LightningModule):
     def __init__(self, 
                  encoder: nn.Module, 
                  loss='MSELoss', 
@@ -45,18 +45,17 @@ class BaseS4LightningModule(L.LightningModule):
         self.threshold = threshold
         self.freeze_branches = freeze_branches
 
-        # 1. Initialize Loss Functioni
+        # initialize loss function
         if self.loss == 'MSELoss':
             self.criterion = nn.MSELoss()
         elif self.loss == 'WeightedMSELoss':
             self.criterion = WeightedMSELoss(weights=weights)
         elif self.loss == 'GaussianNLLLoss':
-            # NOTE: For GaussianNLLLoss, the encoder output must be 2*d_output
             self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
         else: 
             raise ValueError(f'Unknown loss function {self.loss}')
 
-        # 2. Setup Curriculum Learning Scheduler
+        # setup Curriculum Learning Scheduler
         if self.use_curriculum_learning:
             self.noise_scheduler = NoiseScheduler(
                 schedule_type=noise_schedule_type,
@@ -64,22 +63,25 @@ class BaseS4LightningModule(L.LightningModule):
                 total_epochs=trainer_max_epochs
             )
 
-        self.save_hyperparameters(ignore=['encoder', 'weights', 'max_noise_const'])
+        self.save_hyperparameters()
 
     def __loss__(self, y, y_preds):
-        """Calculates the loss based on the initialized criterion."""
+        # TODO: check if this is really correct
         # Handle 1D vs 2D output targets consistently
         if y.ndim > 1 and y.shape[-1] == 1:
             y = y.squeeze(-1)
         if y_preds.ndim > 1 and y_preds.shape[-1] == 1:
             y_preds = y_preds.squeeze(-1)
-            
-        return self.criterion(y_preds, y) # PyTorch MSELoss is typically (input, target)
+
+        if self.loss == 'GaussianNLLLoss':
+            mean, var = torch.chunk(y_preds, 2, dim=-1)
+            var_pos = F.softplus(var)
+            return self.criterion(mean, y, var_pos)
+        else:
+            return self.criterion(y_preds, y)
 
     def configure_optimizers(self):
-        """
-        Configures the optimizer and selected LR scheduler based on self.lr_schedule_type.
-        """
+        # configures the optimizer and selected LR scheduler based on self.lr_schedule_type
         p_wd, p_non_wd, optim_params = [], [], []
         learning_rate = self.hparams.learning_rate
         for name, param in self.named_parameters():
@@ -154,13 +156,12 @@ class BaseS4LightningModule(L.LightningModule):
             self.log("curriculum/noise_const", new_noise_const, on_epoch=True)
 
 
-class LitS4Model(BaseS4LightningModule):
+class LitS4Model(BaseLightningModule):
     def __init__(self, apply_fft, **kwargs):
         super().__init__(**kwargs)
         
         self.input_type = "fft" if apply_fft else "ts"
-        
-        self.save_hyperparameters(ignore=['encoder', 'weights', 'max_noise_const'])
+        self.save_hyperparameters()
 
     def forward(self, x):
         return self.encoder(x)
@@ -187,7 +188,7 @@ class LitS4Model(BaseS4LightningModule):
         return loss
 
 
-class LitS4DualModel(BaseS4LightningModule):
+class LitS4DualModel(BaseLightningModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
