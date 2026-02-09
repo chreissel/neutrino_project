@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/s4d_fft_dmodel128_layers6_lr1e-3_ROP_batchsize256_normfft_best'
+  default_root_dir: 'runs/s4d_fft_dmodel128_layers6_lr1e-3_ROP_batchsize128_normfft_best'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -26,7 +26,7 @@ data:
     observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz','radius_m']
     batch_size: 128
     num_workers: 4
-    path: '/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5'
+    path: '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_fullsim.hdf5'
     cutoff: 8192
     noise_const: 1.0
 
