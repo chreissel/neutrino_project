@@ -4,6 +4,39 @@ This repo contains all the code to run the electron energy reconstruction for Pr
 
 Physics background: **Project 8** uses Cyclotron Radiation Emission Spectroscopy to measure the tritium beta decay spectrum with unprecedented precision. When electrons from beta decay spiral in a magnetic field, they emit cyclotron radiation at frequencies from which we can derive their energy. The neutrino mass affects the endpoint of the beta decay spectrum, providing a path to measuring this fundamental parameter.
 
+### Repository structure
+
+```text
+neutrino_project/
+├── configs/                                
+├── notebooks/            
+├── scripts/
+    ├── combine_data.py
+    ├── data_prep.py
+├── src/
+    ├── __init__.py                
+    ├── data/             
+      ├── __init__.py
+      ├── data.py
+      ├── dataset.py
+    ├── models/            
+      ├── __init__.py
+      ├── curriculum_scheduler.py
+      ├── losses.py
+      ├── model.py
+      ├── networks.py
+      ├── s4d.py
+    ├── utils/            
+      ├── __init__.py
+      ├── noise.py
+      ├── plotting.py
+      ├── transforms.py
+├── cli.py                
+├── env.yml               
+├── submit.sh             
+└── README.md           
+```
+
 ### Setup and Installation
 1. Clone the repository
 ```
