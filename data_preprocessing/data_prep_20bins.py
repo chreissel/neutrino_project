@@ -16,10 +16,10 @@ def open_pickle(fname):
         with open(fname, "rb") as f:
             return pickle.load(f)
 
-pickle_paths = ("/home/lfd34/project/project8/ssm/neutrino_project/data_preprocessing/pickles_20_bins/*.pkl")
+pickle_paths = ("/home/lfd34/project/project8/ssm/neutrino_project/data_preprocessing/pickles_20bins/*.pkl")
 output_dir = ("/home/lfd34/project/project8/ssm/neutrino_project/data_preprocessing/shards_20bins")
 
-events_per_shard = 5000
+events_per_shard = 2500
 
 os.makedirs(output_dir, exist_ok=True)
 

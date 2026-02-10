@@ -64,7 +64,8 @@ class BaseS4LightningModule(L.LightningModule):
                 total_epochs=trainer_max_epochs
             )
 
-        self.save_hyperparameters(ignore=['encoder', 'weights', 'max_noise_const'])
+        #self.save_hyperparameters(ignore=['encoder', 'weights', 'max_noise_const'])
+        self.save_hyperparameters(ignore=[])
 
     def __loss__(self, y, y_preds):
         """Calculates the loss based on the initialized criterion."""
@@ -155,24 +156,18 @@ class BaseS4LightningModule(L.LightningModule):
 
 
 class LitS4Model(BaseS4LightningModule):
-    def __init__(self, apply_fft, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        self.input_type = "fft" if apply_fft else "ts"
-        
-        self.save_hyperparameters(ignore=['encoder', 'weights', 'max_noise_const'])
+        #self.save_hyperparameters(ignore=['encoder', 'weights', 'max_noise_const'])
+        self.save_hyperparameters(ignore=[])
 
     def forward(self, x):
         return self.encoder(x)
-   
-    def get_input_and_target(self, batch):
-        ts_input, fft_input, y, _ = batch
-        x = ts_input if self.input_type == 'ts' else fft_input
-        return x, y
 
     def training_step(self, batch, batch_idx):
-        x, y = self.get_input_and_target(batch)
-        y_preds = self.forward(x)
+        x, y, _ = batch
+        y_preds = self.forward(x) 
         loss = self.__loss__(y, y_preds)
         current_lr = self.optimizers().param_groups[0]['lr']
         self.log("lr", current_lr, on_step=False, on_epoch=True, logger=True)
@@ -180,7 +175,7 @@ class LitS4Model(BaseS4LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = self.get_input_and_target(batch)
+        x, y, _ = batch
         y_preds = self.forward(x)
         loss = self.__loss__(y, y_preds)
         self.log(f"val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)

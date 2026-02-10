@@ -2,6 +2,7 @@ from torch import nn, optim
 import torch
 import torch.nn.functional as F
 from .s4d import S4D, DropoutNd
+from torch.utils.checkpoint import checkpoint
 
 activations = {
     "relu": nn.ReLU(),
@@ -167,28 +168,37 @@ class S4DModel(nn.Module):
     def forward(self, x):
         x = self.encoder(x)  # (B, L, d_input) -> (B, L, d_model)
         x = x.transpose(-1, -2)  # (B, L, d_model) -> (B, d_model, L)
-        for layer, norm, dropout in zip(self.s4_layers, self.norms, self.dropouts):
-            # Each iteration of this loop will map (B, d_model, L) -> (B, d_model, L)
+
+        for layer, norm, dropout_layer in zip(self.s4_layers, self.norms, self.dropouts):
+            def create_custom_forward(module):
+                def custom_forward(input_data):
+                    # S4D returns (output, state) - we only need output for the residual
+                    out, _ = module(input_data)
+                    return out
+                return custom_forward
+
             z = x
             if self.prenorm:
                 # Prenorm
                 z = norm(z.transpose(-1, -2)).transpose(-1, -2)
-            # Apply S4 block: we ignore the state input and output
-            z, _ = layer(z)
-            # Dropout on the output of the S4 block
-            z = dropout(z)
-            # Residual connection
-            x = z + x
+            
+            # Only store the input 'z'
+            # and re-calculate the FFT math during the backward pass.
+            z = checkpoint(create_custom_forward(layer), z, use_reentrant=False)
+            
+            z = dropout_layer(z)
+            x = z + x # Residual connection
+            
             if not self.prenorm:
-                # Postnorm
                 x = norm(x.transpose(-1, -2)).transpose(-1, -2)
+
         x = x.transpose(-1, -2)
         # Pooling: average pooling over the sequence length
-        x = x.mean(dim=1)
+        x = x.mean(dim=1)  # (B, d_model)
         # Decode the outputs
         x = self.decoder(x)  # (B, d_model) -> (B, d_output)
-        return x
-
+        return x    
+    
 class S4DFeatureExtractor(nn.Module):
     def __init__(self, d_input, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[64, 32]):
         super().__init__()

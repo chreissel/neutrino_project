@@ -36,7 +36,7 @@ signal_len = int(163840*1.0)     # Number of time samples
 def process(files):
     info_list = []
     counter = 0
-    pattern = "long_tracks/SpreadsheetRow44_SSM_20bins_*.pkl"
+    pattern = "pickles_20bins1/SpreadsheetRow44_SSM_20bins_*.pkl"
 
     existing = glob.glob(pattern)
 
@@ -102,12 +102,12 @@ def process(files):
         if(counter%50==0):
             print(counter50s)
             df = pd.DataFrame(info_list)
-            outfile = f"./long_tracks/SpreadsheetRow44_SSM_20bins_{counter50s}.pkl"
+            outfile = f"./pickles_20bins1/SpreadsheetRow44_SSM_20bins_{counter50s}.pkl"
             if os.path.exists(outfile):
                     raise RuntimeError(f"Refusing to overwrite {outfile}")
             df.to_pickle(outfile)
             # save to pickle every 50 files
-            df.to_pickle("./long_tracks/SpreadsheetRow44_SSM_20bins_%d.pkl"%(counter50s))
+            df.to_pickle("./pickles_20bins1/SpreadsheetRow44_SSM_20bins_%d.pkl"%(counter50s))
             counter50s+=1
             info_list = []
 
