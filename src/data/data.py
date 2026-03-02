@@ -17,9 +17,9 @@ class GenericDataModule(L.LightningDataModule):
 
 class LitDataModule(GenericDataModule):
     def __init__(self, 
-            inputs, variables, observables, 
+            inputs, variables, observables,
+            data_dir,
             cutoff=4000, 
-            path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', 
             norm=True, 
             noise_const=1, 
             apply_filter=False, 
@@ -34,7 +34,7 @@ class LitDataModule(GenericDataModule):
         self.use_curriculum_learning = use_curriculum_learning
 
         self.dataset = Project8Sim(
-            inputs, variables, observables, path, cutoff, norm,
+            inputs, variables, observables, data_dir, cutoff, norm,
             initial_noise_const, apply_filter, freq_transform, q_params
         )
         self.mu = self.dataset.mu
