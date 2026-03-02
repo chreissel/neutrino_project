@@ -3,164 +3,179 @@ from torch.utils.data import random_split, DataLoader, Dataset
 import h5py
 import numpy as np
 import torch
+from pathlib import Path
 from src.utils.noise import *
-from src.utils.transforms import fft_func_IQ_complex_channels, qtransform_func_IQ_complex_channels 
+from src.utils.transforms import fft_func_IQ_complex_channels, qtransform_func_IQ_complex_channels
+import os
 
 class Project8Sim(Dataset):
-    def __init__(self, 
-            inputs, variables, observables, 
-            path='/gpfs/gibbs/pi/heeger/hb637/ssm_files_pi_heeger/combined_data_fullsim.hdf5', 
-            cutoff=4000, 
-            norm=True, 
+    def __init__(self,
+            inputs, variables, observables,
+            data_dir,           
+            cutoff=4000,
+            norm=True,
             noise_const=1,
-            apply_filter = False,
-            freq_transform='fft',  # 'fft', 'qtransform', 'both', or None
-            q_params=None):  # Dict with Q-transform parameters):
+            apply_filter=False,
+            freq_transform='fft', # 'fft', 'qtransform', 'both', or None
+            q_params=None):
 
-        arr = {}
-        with h5py.File(path, 'r') as f:
-            for i in inputs+variables+observables:
-                arr[i] = f[i][:]
-                arr[i] = arr[i][:, np.newaxis]
+        data_dir = str(data_dir)
+        hdf5_files = sorted([
+            os.path.join(data_dir, f)
+            for f in os.listdir(data_dir)
+            if f.endswith('.hdf5') or f.endswith('.h5')
+        ])
+        if not hdf5_files:
+            raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
 
-        X_original = np.concatenate([arr[i] for i in inputs], axis = 1)
-        self.X_original = np.swapaxes(X_original,1,2)[:,:cutoff, :]
-        self.y_original = np.concatenate([arr[v] for v in variables], axis = 1)
-        self.obs = np.concatenate([arr[o] for o in observables], axis = 1)
+        self.paths = hdf5_files
 
-        self.inputs = inputs
-        self.cutoff = cutoff
-        self.norm = norm
+        self.inputs       = inputs
+        self.variables    = variables
+        self.observables  = observables
+        self.cutoff       = cutoff
+        self.norm         = norm
+        self.noise_const  = noise_const
         self.apply_filter = apply_filter
-        self.noise_const = noise_const
-
         self.freq_transform = freq_transform
-        # Q-transform parameters with defaults
-        if q_params is None:
-            self.q_params = {
-                'fs': 200e6,
-                'fmin': 1e6,
-                'fmax': 100e6,
-                'q_value': 5.0,
-                'num_freqs': 100
-            }
-        else:
-            self.q_params = q_params
+
+        self.q_params = q_params or {
+            'fs': 200e6, 'fmin': 1e6, 'fmax': 100e6,
+            'q_value': 5.0, 'num_freqs': 100
+        }
+
+        self._index = []
+        self._file_lengths = {}
+        for path in self.paths:
+            with h5py.File(path, 'r') as f:
+                n = f[(variables + observables + inputs)[0]].shape[0]
+            self._file_lengths[path] = n
+            self._index.extend((path, i) for i in range(n))
 
         if norm:
-            self.mu = np.mean(self.y_original, axis=0)
-            self.stds = np.std(self.y_original, axis=0)
-            self.vars = (self.y_original - self.mu) / self.stds
+            self.mu, self.stds = self._compute_norm_stats()
         else:
-            # TODO: see what changed here!
-            self.mu = np.zeros_like(self.y_original[0])
-            self.stds = np.ones_like(self.y_original[0])
-            self.vars = self.y_original
+            self.mu = self.stds = None
 
-    def _compute_fft(self, X_ts, index_ts_I, index_ts_Q):
-        # function to call FFT transform
+        self._file_handles: dict = {}
+
+    def _compute_norm_stats(self):
+        n_vars = len(self.variables)
+        count  = 0
+        mean   = np.zeros(n_vars, dtype=np.float64)
+        M2     = np.zeros(n_vars, dtype=np.float64)
+
+        for path in self.paths:
+            with h5py.File(path, 'r') as f:
+                # read only the variable columns (NOT inputs – much smaller)
+                data = np.stack([f[v][:] for v in self.variables], axis=1)  # (N, n_vars)
+                data = data.reshape(len(data), n_vars)
+            for row in data:          # Welford online update
+                count += 1
+                delta  = row - mean
+                mean  += delta / count
+                M2    += delta * (row - mean)
+
+        return mean.astype(np.float32), np.sqrt(M2 / count).astype(np.float32)
+
+    def _get_handle(self, path):
+        if path not in self._file_handles:
+            self._file_handles[path] = h5py.File(path, 'r')
+        return self._file_handles[path]
+
+    def _read_row(self, path, local_idx, keys):
+        f = self._get_handle(path)
+        return {k: f[k][local_idx] for k in keys}
+
+    def _compute_fft(self, X_ts, index_I, index_Q):
+        real, imag = fft_func_IQ_complex_channels(X_ts[:, index_I], X_ts[:, index_Q])
+        stack = np.stack([real, imag], axis=1)
+        mu, std = np.mean(stack, axis=0), np.std(stack, axis=0)
         X_fft = np.zeros_like(X_ts)
-        real_part, imag_part = fft_func_IQ_complex_channels(
-            X_ts[:, index_ts_I],
-            X_ts[:, index_ts_Q]
-        )
-        fft_case_data = np.stack([real_part, imag_part], axis=1)
-        mu_fft_case = np.mean(fft_case_data, axis=0)
-        stds_fft_case = np.std(fft_case_data, axis=0)
-
-        real_part_norm = (real_part - mu_fft_case[0]) / (stds_fft_case[0] + 1e-8)
-        imag_part_norm = (imag_part - mu_fft_case[1]) / (stds_fft_case[1] + 1e-8)
-
-        X_fft[:, index_ts_I] = real_part_norm
-        X_fft[:, index_ts_Q] = imag_part_norm
-
+        X_fft[:, index_I] = (real - mu[0]) / (std[0] + 1e-8)
+        X_fft[:, index_Q] = (imag - mu[1]) / (std[1] + 1e-8)
         return X_fft
 
-    def _compute_qtransform(self, X_ts, index_ts_I, index_ts_Q):
-        # function to call Q tranform
-        real_part, imag_part = qtransform_func_IQ_complex_channels(
-            X_ts[:, index_ts_I],
-            X_ts[:, index_ts_Q],
-            **self.q_params
-        )
-
-        num_freqs = self.q_params['num_freqs']
-        real_part = real_part.reshape(self.cutoff, num_freqs)
-        imag_part = imag_part.reshape(self.cutoff, num_freqs)
-
-        # Normalize
-        q_case_data = np.stack([real_part, imag_part], axis=0)
-        mu_q_case = np.mean(q_case_data, axis=(1, 2), keepdims=True)
-        stds_q_case = np.std(q_case_data, axis=(1, 2), keepdims=True)
-
-        real_part_norm = (real_part - mu_q_case[0]) / (stds_q_case[0] + 1e-8)
-        imag_part_norm = (imag_part - mu_q_case[1]) / (stds_q_case[1] + 1e-8)
-
-        # Stack: [cutoff, num_freqs, 2]
-        X_q = np.stack([real_part_norm, imag_part_norm], axis=-1)
-
-        return X_q
-
-    def __getitem__(self, idx):
-        X_clean = self.X_original[idx].copy()
-        X_ts = X_clean.copy()
-        
-        # Apply noise to time series
-        for j in range(X_ts.shape[1]):
-            noise_arr = noise_model(self.cutoff, self.noise_const)
-            X_noise = X_clean[:, j] + noise_arr
-            if self.apply_filter:
-                X_noise = bandpass_filter(X_noise)
-            std_X = np.std(X_noise) if self.norm else 1
-            X_ts[:, j] = X_noise / std_X
-        
-        ts = torch.tensor(X_ts, dtype=torch.float32)
-        var = torch.tensor(self.vars[idx], dtype=torch.float32)
-        obs = torch.tensor(self.obs[idx, :], dtype=torch.float32)
-        
-        # Compute frequency transforms based on configuration
-        if self.freq_transform is None:
-            return ts, var, obs
-        
-        index_ts_I = self.inputs.index('output_ts_I')
-        index_ts_Q = self.inputs.index('output_ts_Q')
-        
-        if self.freq_transform == 'fft':
-            X_fft = self._compute_fft(X_ts, index_ts_I, index_ts_Q)
-            fft = torch.tensor(X_fft, dtype=torch.float32)
-            return ts, fft, var, obs
-        
-        elif self.freq_transform == 'qtransform':
-            X_q = self._compute_qtransform(X_ts, index_ts_I, index_ts_Q)
-            qtransform = torch.tensor(X_q, dtype=torch.float32)
-            return qtransform, var, obs
-        
-        elif self.freq_transform == 'both':
-            X_fft = self._compute_fft(X_ts, index_ts_I, index_ts_Q)
-            fft = torch.tensor(X_fft, dtype=torch.float32)
-            return ts, fft, var, obs
-        
-        else:
-            raise ValueError(f"Invalid freq_transform: {self.freq_transform}. "
-                           f"Must be 'fft', 'qtransform', 'both', or None")
-
-    def outdim(self):
-        return self.vars.shape[1]
+    def _compute_qtransform(self, X_ts, index_I, index_Q):
+        real, imag = qtransform_func_IQ_complex_channels(
+            X_ts[:, index_I], X_ts[:, index_Q], **self.q_params)
+        nf = self.q_params['num_freqs']
+        real = real.reshape(self.cutoff, nf)
+        imag = imag.reshape(self.cutoff, nf)
+        stack = np.stack([real, imag], axis=0)
+        mu    = np.mean(stack, axis=(1, 2), keepdims=True)
+        std   = np.std( stack, axis=(1, 2), keepdims=True)
+        return np.stack([(real - mu[0]) / (std[0] + 1e-8),
+                         (imag - mu[1]) / (std[1] + 1e-8)], axis=-1)  # (cutoff, nf, 2)
 
     def __len__(self):
-        return self.vars.shape[0]
+        return len(self._index)
 
-    def __indim_ts__(self):
-        return self.X_original.shape[2]
+    def __getitem__(self, idx):
+        path, local_idx = self._index[idx]
+        row = self._read_row(path, local_idx, self.inputs + self.variables + self.observables)
 
+        # inputs → (cutoff, n_inputs)
+        X_clean = np.stack([row[k] for k in self.inputs], axis=-1)[:self.cutoff]
+        X_ts    = X_clean.copy()
+
+        for j in range(X_ts.shape[1]):
+            noise  = noise_model(self.cutoff, self.noise_const)
+            Xn     = X_clean[:, j] + noise
+            if self.apply_filter:
+                Xn = bandpass_filter(Xn)
+            X_ts[:, j] = Xn / (np.std(Xn) + 1e-8) if self.norm else Xn
+
+        y_raw    = np.array([row[v] for v in self.variables],   dtype=np.float32)
+        var_norm = (y_raw - self.mu) / (self.stds + 1e-8) if self.norm else y_raw
+        obs      = np.array([row[o] for o in self.observables], dtype=np.float32)
+
+        ts  = torch.tensor(X_ts,     dtype=torch.float32)
+        var = torch.tensor(var_norm, dtype=torch.float32)
+        obs = torch.tensor(obs,      dtype=torch.float32)
+
+        if self.freq_transform is None:
+            return ts, var, obs
+
+        iI = self.inputs.index('output_ts_I')
+        iQ = self.inputs.index('output_ts_Q')
+
+        if self.freq_transform == 'fft':
+            return ts, torch.tensor(self._compute_fft(X_ts, iI, iQ), dtype=torch.float32), var, obs
+
+        if self.freq_transform == 'qtransform':
+            return torch.tensor(self._compute_qtransform(X_ts, iI, iQ), dtype=torch.float32), var, obs
+
+        if self.freq_transform == 'both':
+            fft = torch.tensor(self._compute_fft(X_ts, iI, iQ),        dtype=torch.float32)
+            qt  = torch.tensor(self._compute_qtransform(X_ts, iI, iQ), dtype=torch.float32)
+            return ts, fft, qt, var, obs
+
+        raise ValueError(f"Invalid freq_transform '{self.freq_transform}'. "
+                         "Choose 'fft', 'qtransform', 'both', or None.")
+
+    def outdim(self):          return len(self.variables)
+    def __indim_ts__(self):    return len(self.inputs)
     def __indim_fft__(self):
-        if self.freq_transform in ['fft', 'both']:
-            return self.X_original.shape[2]
-        elif self.freq_transform == 'qtransform':
-            return self.q_params['num_freqs'] * 2  # real + imag
-        return None
-
+        if self.freq_transform in ('fft', 'both'):     return len(self.inputs)
+        if self.freq_transform == 'qtransform':        return self.q_params['num_freqs'] * 2
     def __indim_qtransform__(self):
-        if self.freq_transform in ['qtransform', 'both']:
-            return self.q_params['num_freqs'] * 2  # real + imag
-        return None
+        if self.freq_transform in ('qtransform', 'both'): return self.q_params['num_freqs'] * 2
+
+    def close(self):
+        for fh in self._file_handles.values(): fh.close()
+        self._file_handles.clear()
+    def __del__(self): self.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Required when using DataLoader with num_workers > 0
+# HDF5 is not fork-safe; each worker must open its own handles.
+#
+#   loader = DataLoader(dataset, num_workers=4, worker_init_fn=worker_init_fn)
+# ─────────────────────────────────────────────────────────────────────────────
+def worker_init_fn(worker_id):
+    import torch.utils.data
+    info = torch.utils.data.get_worker_info()
+    if info is not None:
+        info.dataset._file_handles = {}
