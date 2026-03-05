@@ -16,13 +16,13 @@ from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, CosineAnn
 class BaseS4LightningModule(L.LightningModule):
     def __init__(self, 
                  encoder: nn.Module, 
+                 learning_rate=1e-3,
                  loss='MSELoss', 
                  weights=None, 
                  use_curriculum_learning=False, 
                  max_noise_const=1.0, 
                  noise_schedule_type='linear', 
-                 trainer_max_epochs=100,
-                 learning_rate=1e-3, 
+                 trainer_max_epochs=100, 
                  weight_decay=0.0,
                  gamma=0.99,
                  lr_schedule_type='exponential',
@@ -89,7 +89,7 @@ class BaseS4LightningModule(L.LightningModule):
             if hasattr(param, "_optim"):
                 optim_dict = param._optim
                 group = {"params": [param]}
-                if "lr" in optim_dict: group["lr"] = optim_dict["lr"]
+                group["lr"] = optim_dict.get("lr", learning_rate)
                 if "weight_decay" in optim_dict: group["weight_decay"] = optim_dict["weight_decay"]
                 optim_params.append(group)
                 continue
@@ -172,6 +172,10 @@ class LitS4Model(BaseS4LightningModule):
         current_lr = self.optimizers().param_groups[0]['lr']
         self.log("lr", current_lr, on_step=False, on_epoch=True, logger=True)
         self.log(f"train/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        if batch_idx == 0:
+            opts = self.optimizers()
+            for i, group in enumerate(opts.param_groups):
+                print(f"Group {i} Learning Rate: {group['lr']}")
         return loss
 
     def validation_step(self, batch, batch_idx):

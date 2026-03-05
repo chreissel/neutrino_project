@@ -93,11 +93,11 @@ class Project8Sim(Dataset):
                     X_ts[:, index_ts_I],
                     X_ts[:, index_ts_Q]
                 )
-        fft_case_data = np.stack([real_part, imag_part], axis=1) # (Length, 2)
-        mu_fft = np.mean(fft_case_data, axis=0)
-        std_fft = np.std(fft_case_data, axis=0)
-        X_ts[:, index_ts_I] = (real_part - mu_fft[0]) / (std_fft[0])
-        X_ts[:, index_ts_Q] = (imag_part - mu_fft[1]) / (std_fft[1])
+            fft_case_data = np.stack([real_part, imag_part], axis=1) # (Length, 2)
+            mu_fft = np.mean(fft_case_data, axis=0)
+            std_fft = np.std(fft_case_data, axis=0)
+            X_ts[:, index_ts_I] = (real_part - mu_fft[0]) / (std_fft[0])
+            X_ts[:, index_ts_Q] = (imag_part - mu_fft[1]) / (std_fft[1])
         
         ts = torch.tensor(X_ts, dtype=torch.float32)
         var = torch.tensor((y - self.mu) / self.stds, dtype=torch.float32)

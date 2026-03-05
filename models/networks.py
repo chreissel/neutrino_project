@@ -144,7 +144,7 @@ class MLP(nn.Module):
 
 dropout_fn = nn.Dropout2d
 class S4DModel(nn.Module):
-    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32]):
+    def __init__(self, d_input, d_output, d_model=256, n_layers=4, lr=0.001, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32], ckpt_path=None):
         super().__init__()
 
         self.d_output = d_output
@@ -157,13 +157,32 @@ class S4DModel(nn.Module):
         self.dropouts = nn.ModuleList()
         for _ in range(n_layers):
             self.s4_layers.append(
-                S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001, 0.01))
+                #S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001, 0.01))
+                S4D(d_model, dropout=dropout, transposed=True, lr=lr)
             )
             self.norms.append(nn.LayerNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
         # Linear decoder
         #self.decoder = nn.Linear(d_model, d_output)
         self.decoder = MLP(d_model, fc_hidden, d_output)
+
+        if ckpt_path:
+            self._load_branch_weights(ckpt_path)
+
+
+    def _load_branch_weights(self, ckpt_path):
+        if ckpt_path is None:
+            return
+        ckpt = torch.load(ckpt_path, map_location='cpu')
+        state_dict = ckpt.get('state_dict', ckpt)
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            name = k.replace('model.', '').replace('encoder.', '')
+            if 'decoder' in name and v.shape[0] != self.d_output:
+                print(f"Skipping weight {k} due to dimension mismatch")
+                continue
+            new_state_dict[name] = v
+        missing_keys, unexpected_keys = self.load_state_dict(new_state_dict, strict=False)
 
     def forward(self, x):
         x = self.encoder(x)  # (B, L, d_input) -> (B, L, d_model)
@@ -197,8 +216,9 @@ class S4DModel(nn.Module):
         x = x.mean(dim=1)  # (B, d_model)
         # Decode the outputs
         x = self.decoder(x)  # (B, d_model) -> (B, d_output)
-        return x    
-    
+        return x
+
+
 class S4DFeatureExtractor(nn.Module):
     def __init__(self, d_input, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[64, 32]):
         super().__init__()
