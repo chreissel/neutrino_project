@@ -29,7 +29,7 @@ data:
     batch_size: 16
     pin_memory: True
     num_workers: 4
-    data_dir: '/n/holystore01/LABS/iaifi_lab/Lab/hbinney/ssm_files/combined_data_20bins/'
+    data_dir: '/home/lfd34/project/project8/ssm/neutrino_project/data_preprocessing/shards_20bins/'
     cutoff: 163840
     noise_const: 1.0
 
