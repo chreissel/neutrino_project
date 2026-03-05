@@ -179,3 +179,92 @@ def worker_init_fn(worker_id):
     info = torch.utils.data.get_worker_info()
     if info is not None:
         info.dataset._file_handles = {}
+
+
+class Project8SimDenoising(Dataset):
+    """Dataset for the S4D denoising task.
+
+    Returns ``(X_noisy, X_clean)`` pairs where:
+    - ``X_noisy`` – simulated I/Q signal with Gaussian noise added, normalised
+      per channel by ``std(X_noisy[:, j])``.
+    - ``X_clean`` – the raw (noiseless) simulation signal, normalised by the
+      *same* per-channel ``std(X_noisy[:, j])`` so that both tensors live in
+      the same coordinate space.
+
+    Both tensors have shape ``(cutoff, len(inputs))``.
+    """
+
+    def __init__(self,
+                 inputs,
+                 data_dir,
+                 cutoff=4000,
+                 noise_const=1,
+                 apply_filter=False):
+
+        data_dir = str(data_dir)
+        hdf5_files = sorted([
+            os.path.join(data_dir, f)
+            for f in os.listdir(data_dir)
+            if f.endswith('.hdf5') or f.endswith('.h5')
+        ])
+        if not hdf5_files:
+            raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
+
+        self.paths        = hdf5_files
+        self.inputs       = inputs
+        self.cutoff       = cutoff
+        self.noise_const  = noise_const
+        self.apply_filter = apply_filter
+
+        self._index = []
+        for path in self.paths:
+            with h5py.File(path, 'r') as f:
+                n = f[inputs[0]].shape[0]
+            self._index.extend((path, i) for i in range(n))
+
+        self._file_handles: dict = {}
+
+    def _get_handle(self, path):
+        if path not in self._file_handles:
+            self._file_handles[path] = h5py.File(path, 'r')
+        return self._file_handles[path]
+
+    def _read_row(self, path, local_idx, keys):
+        f = self._get_handle(path)
+        return {k: f[k][local_idx] for k in keys}
+
+    def __len__(self):
+        return len(self._index)
+
+    def __getitem__(self, idx):
+        path, local_idx = self._index[idx]
+        row = self._read_row(path, local_idx, self.inputs)
+
+        X_clean = np.stack([row[k] for k in self.inputs], axis=-1)[:self.cutoff]
+        X_noisy_norm = np.zeros_like(X_clean)
+        X_clean_norm = np.zeros_like(X_clean)
+
+        for j in range(X_clean.shape[1]):
+            noise = noise_model(self.cutoff, self.noise_const)
+            Xn = X_clean[:, j] + noise
+            if self.apply_filter:
+                Xn = bandpass_filter(Xn)
+            s = np.std(Xn) + 1e-8
+            X_noisy_norm[:, j] = Xn / s
+            X_clean_norm[:, j] = X_clean[:, j] / s
+
+        return (
+            torch.tensor(X_noisy_norm, dtype=torch.float32),
+            torch.tensor(X_clean_norm, dtype=torch.float32),
+        )
+
+    def __indim__(self):
+        return len(self.inputs)
+
+    def close(self):
+        for fh in self._file_handles.values():
+            fh.close()
+        self._file_handles.clear()
+
+    def __del__(self):
+        self.close()
