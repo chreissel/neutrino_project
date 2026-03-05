@@ -377,6 +377,65 @@ class S4D_S4D_Model(nn.Module):
         output = self.final_mlp(combined)
         return output
 
+class S4DSeq2SeqModel(nn.Module):
+    """S4D sequence-to-sequence model for denoising.
+
+    Unlike S4DModel (which pools over the time axis and produces a scalar
+    output), this model preserves the full sequence length and maps each
+    timestep to d_output channels.  It is intended for tasks where the
+    target is a time-series of the same length as the input, e.g. removing
+    noise from an I/Q signal.
+
+    Input shape:  (B, L, d_input)
+    Output shape: (B, L, d_output)
+    """
+
+    def __init__(self, d_input, d_output, d_model=128, n_layers=4,
+                 dropout=0.0, prenorm=False):
+        super().__init__()
+        self.prenorm = prenorm
+
+        self.encoder = nn.Linear(d_input, d_model)
+
+        self.s4_layers = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        self.dropouts = nn.ModuleList()
+        for _ in range(n_layers):
+            self.s4_layers.append(
+                S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001, 0.01))
+            )
+            self.norms.append(nn.LayerNorm(d_model))
+            self.dropouts.append(DropoutNd(dropout))
+
+        # Per-timestep linear decoder (no pooling over L)
+        self.decoder = nn.Linear(d_model, d_output)
+
+    def forward(self, x):
+        # x: (B, L, d_input)
+        x = self.encoder(x)          # (B, L, d_model)
+        x = x.transpose(-1, -2)      # (B, d_model, L)  — expected by S4D
+
+        for layer, norm, dropout in zip(self.s4_layers, self.norms, self.dropouts):
+            def create_custom_forward(module):
+                def custom_forward(input_data):
+                    out, _ = module(input_data)
+                    return out
+                return custom_forward
+
+            z = x
+            if self.prenorm:
+                z = norm(z.transpose(-1, -2)).transpose(-1, -2)
+            z = checkpoint(create_custom_forward(layer), z, use_reentrant=False)
+            z = dropout(z)
+            x = z + x
+            if not self.prenorm:
+                x = norm(x.transpose(-1, -2)).transpose(-1, -2)
+
+        x = x.transpose(-1, -2)      # (B, L, d_model)
+        x = self.decoder(x)          # (B, L, d_output)  — no mean-pooling
+        return x
+
+
 class S4D_S4D_GatedModel(nn.Module):
     def __init__(self,
                  output_dim=2,

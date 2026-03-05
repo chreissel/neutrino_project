@@ -218,3 +218,34 @@ class LitS4DualModel(BaseLightningModule):
         loss = self.__loss__(y, y_preds)
         self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
+
+
+class LitS4DenoisingModel(BaseLightningModule):
+    """Lightning module for the S4D denoising task.
+
+    Expects batches of ``(X_noisy, X_clean)`` as produced by
+    :class:`~src.data.data.LitDenoisingDataModule`.  The encoder should be an
+    :class:`~src.models.networks.S4DSeq2SeqModel` (or any ``nn.Module`` that
+    maps ``(B, L, C_in)`` → ``(B, L, C_out)``).
+
+    Loss: MSELoss (``GaussianNLLLoss`` is not supported for sequence targets).
+    """
+
+    def forward(self, x):
+        return self.encoder(x)
+
+    def training_step(self, batch, batch_idx):
+        x_noisy, x_clean = batch
+        y_preds = self.forward(x_noisy)
+        loss = self.__loss__(x_clean, y_preds)
+        current_lr = self.optimizers().param_groups[0]['lr']
+        self.log("lr", current_lr, on_step=False, on_epoch=True, logger=True)
+        self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x_noisy, x_clean = batch
+        y_preds = self.forward(x_noisy)
+        loss = self.__loss__(x_clean, y_preds)
+        self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
