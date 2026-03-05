@@ -416,16 +416,10 @@ class S4DSeq2SeqModel(nn.Module):
         x = x.transpose(-1, -2)      # (B, d_model, L)  — expected by S4D
 
         for layer, norm, dropout in zip(self.s4_layers, self.norms, self.dropouts):
-            def create_custom_forward(module):
-                def custom_forward(input_data):
-                    out, _ = module(input_data)
-                    return out
-                return custom_forward
-
             z = x
             if self.prenorm:
                 z = norm(z.transpose(-1, -2)).transpose(-1, -2)
-            z = checkpoint(create_custom_forward(layer), z, use_reentrant=False)
+            z, _ = layer(z)
             z = dropout(z)
             x = z + x
             if not self.prenorm:
