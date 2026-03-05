@@ -16,7 +16,7 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 2
+  max_epochs: 10
 
 data:
   class_path: src.data.data.LitDenoisingDataModule
@@ -34,7 +34,7 @@ model:
   class_path: src.models.model.LitS4DenoisingModel
   init_args:
     loss: 'MSELoss'
-    learning_rate: 1e-3
+    learning_rate: 0.5e-4
     lr_schedule_type: reduce_on_plateau
     gamma: 0.25
     lr_patience: 5
@@ -49,3 +49,4 @@ model:
         n_layers: 6
         dropout: 0.0
         prenorm: false
+        gradient_checkpointing: False
