@@ -391,9 +391,10 @@ class S4DSeq2SeqModel(nn.Module):
     """
 
     def __init__(self, d_input, d_output, d_model=128, n_layers=4,
-                 dropout=0.0, prenorm=False):
+                 dropout=0.0, prenorm=False, gradient_checkpointing=False):
         super().__init__()
         self.prenorm = prenorm
+        self.gradient_checkpointing = gradient_checkpointing
 
         self.encoder = nn.Linear(d_input, d_model)
 
@@ -419,7 +420,10 @@ class S4DSeq2SeqModel(nn.Module):
             z = x
             if self.prenorm:
                 z = norm(z.transpose(-1, -2)).transpose(-1, -2)
-            z, _ = layer(z)
+            if self.gradient_checkpointing:
+                z = checkpoint(lambda inp: layer(inp)[0], z, use_reentrant=False)
+            else:
+                z, _ = layer(z)
             z = dropout(z)
             x = z + x
             if not self.prenorm:
