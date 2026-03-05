@@ -10,6 +10,7 @@
 #SBATCH --error=slurm_logs/error-%j.err
 
 source ~/.bash_profile
+module load miniconda
 conda activate ssm
-cd /n/home03/creissel/neutrino_project/
+/home/lfd34/project/project8/ssm/neutrino_project
 python cli.py fit --config $1
