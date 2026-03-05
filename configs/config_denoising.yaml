@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/denoising_v0/'
+  default_root_dir: 'runs/denoising_v1/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -16,7 +16,7 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 10
+  max_epochs: 20
 
 data:
   class_path: src.data.data.LitDenoisingDataModule
