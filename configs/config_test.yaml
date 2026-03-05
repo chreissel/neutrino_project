@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/test/'
+  default_root_dir: 'runs/test_v0/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -27,7 +27,7 @@ data:
     observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz','radius_m']
     batch_size: 128
     num_workers: 4
-    path: '/n/holystore01/LABS/iaifi_lab/Lab/creissel/neutrino_mass/combined_data_fullsim.hdf5'
+    data_dir: '/n/holystore01/LABS/iaifi_lab/Lab/hbinney/ssm_files/combined_data_20bins/'
     cutoff: 8192
     noise_const: 1.0
 
