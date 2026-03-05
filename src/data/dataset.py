@@ -185,11 +185,11 @@ class Project8SimDenoising(Dataset):
     """Dataset for the S4D denoising task.
 
     Returns ``(X_noisy, X_clean)`` pairs where:
-    - ``X_noisy`` – simulated I/Q signal with Gaussian noise added, normalised
-      per channel by ``std(X_noisy[:, j])``.
+    - ``X_noisy`` – simulated I/Q signal with Gaussian noise added, optionally
+      normalised per channel by ``std(X_noisy[:, j])``.
     - ``X_clean`` – the raw (noiseless) simulation signal, normalised by the
       *same* per-channel ``std(X_noisy[:, j])`` so that both tensors live in
-      the same coordinate space.
+      the same coordinate space (only when ``norm=True``).
 
     Both tensors have shape ``(cutoff, len(inputs))``.
     """
@@ -199,7 +199,8 @@ class Project8SimDenoising(Dataset):
                  data_dir,
                  cutoff=4000,
                  noise_const=1,
-                 apply_filter=False):
+                 apply_filter=False,
+                 norm=True):
 
         data_dir = str(data_dir)
         hdf5_files = sorted([
@@ -215,6 +216,7 @@ class Project8SimDenoising(Dataset):
         self.cutoff       = cutoff
         self.noise_const  = noise_const
         self.apply_filter = apply_filter
+        self.norm         = norm
 
         self._index = []
         for path in self.paths:
@@ -249,9 +251,13 @@ class Project8SimDenoising(Dataset):
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
-            s = np.std(Xn) + 1e-8
-            X_noisy_norm[:, j] = Xn / s
-            X_clean_norm[:, j] = X_clean[:, j] / s
+            if self.norm:
+                s = np.std(Xn) + 1e-8
+                X_noisy_norm[:, j] = Xn / s
+                X_clean_norm[:, j] = X_clean[:, j] / s
+            else:
+                X_noisy_norm[:, j] = Xn
+                X_clean_norm[:, j] = X_clean[:, j]
 
         return (
             torch.tensor(X_noisy_norm, dtype=torch.float32),

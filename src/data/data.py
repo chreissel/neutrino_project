@@ -85,6 +85,7 @@ class LitDenoisingDataModule(GenericDataModule):
                  noise_const=1.0,
                  apply_filter=False,
                  use_curriculum_learning=False,
+                 norm=True,
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -96,6 +97,7 @@ class LitDenoisingDataModule(GenericDataModule):
             cutoff=cutoff,
             noise_const=noise_const,
             apply_filter=apply_filter,
+            norm=norm,
         )
 
         generator = torch.Generator().manual_seed(42)
