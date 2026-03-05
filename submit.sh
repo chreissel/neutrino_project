@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=gpu
+#SBATCH --partition=iaifi_gpu
 #SBATCH --time=20:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -12,4 +12,8 @@
 source ~/.bash_profile
 conda activate ssm
 cd /n/home03/creissel/neutrino_project/
-python cli.py fit --config $1
+if [ -n "$2" ]; then
+    python cli.py fit --config $1 --ckpt_path $2
+else
+    python cli.py fit --config $1
+fi
