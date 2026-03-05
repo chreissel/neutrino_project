@@ -8,21 +8,23 @@ import lightning as L
 import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
-from src.models.losses import WeightedMSELoss
+from src.models.losses import WeightedMSELoss, MixtureMSESpectralLoss
 from src.models.curriculum_scheduler import NoiseScheduler
 from src.data.data import LitDataModule
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, CosineAnnealingLR
 
 class BaseLightningModule(L.LightningModule):
-    def __init__(self, 
-                 encoder: nn.Module, 
-                 loss='MSELoss', 
-                 weights=None, 
-                 use_curriculum_learning=False, 
-                 max_noise_const=1.0, 
-                 noise_schedule_type='linear', 
+    def __init__(self,
+                 encoder: nn.Module,
+                 loss='MSELoss',
+                 weights=None,
+                 huber_delta=1.0,
+                 spectral_alpha=0.5,
+                 use_curriculum_learning=False,
+                 max_noise_const=1.0,
+                 noise_schedule_type='linear',
                  trainer_max_epochs=100,
-                 learning_rate=1e-3, 
+                 learning_rate=1e-3,
                  weight_decay=0.0,
                  gamma=0.99,
                  lr_schedule_type='exponential',
@@ -52,7 +54,11 @@ class BaseLightningModule(L.LightningModule):
             self.criterion = WeightedMSELoss(weights=weights)
         elif self.loss == 'GaussianNLLLoss':
             self.criterion = nn.GaussianNLLLoss(reduction='mean', full=False, eps=1e-6)
-        else: 
+        elif self.loss == 'HuberLoss':
+            self.criterion = nn.HuberLoss(delta=huber_delta)
+        elif self.loss == 'MixtureMSESpectralLoss':
+            self.criterion = MixtureMSESpectralLoss(alpha=spectral_alpha)
+        else:
             raise ValueError(f'Unknown loss function {self.loss}')
 
         # setup Curriculum Learning Scheduler
@@ -228,7 +234,8 @@ class LitS4DenoisingModel(BaseLightningModule):
     :class:`~src.models.networks.S4DSeq2SeqModel` (or any ``nn.Module`` that
     maps ``(B, L, C_in)`` → ``(B, L, C_out)``).
 
-    Loss: MSELoss (``GaussianNLLLoss`` is not supported for sequence targets).
+    Loss: ``MSELoss``, ``HuberLoss``, or ``MixtureMSESpectralLoss``
+    (``GaussianNLLLoss`` is not supported for sequence targets).
     """
 
     def forward(self, x):
