@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=gpu
-#SBATCH --time=20:00:00
+#SBATCH --time=32:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
@@ -12,5 +12,5 @@
 source ~/.bash_profile
 module load miniconda
 conda activate ssm
-/home/lfd34/project/project8/ssm/neutrino_project
+cd /home/lfd34/project/project8/ssm/neutrino_project
 python cli.py fit --config $1
