@@ -144,11 +144,12 @@ class MLP(nn.Module):
 
 dropout_fn = nn.Dropout2d
 class S4DModel(nn.Module):
-    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32]):
+    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32], gradient_checkpointing=False):
         super().__init__()
 
         self.d_output = d_output
         self.prenorm = prenorm
+        self.gradient_checkpointing = gradient_checkpointing
 
         self.encoder = nn.Linear(d_input, d_model)
         # Stack S4 layers as residual blocks
@@ -179,9 +180,12 @@ class S4DModel(nn.Module):
             if self.prenorm:
                 # Prenorm
                 z = norm(z.transpose(-1, -2)).transpose(-1, -2)
-            # Only store the input 'z'
-            # and re-calculate the FFT math during the backward pass.
-            z = checkpoint(create_custom_forward(layer), z, use_reentrant=False)
+            if self.gradient_checkpointing:
+                # Only store the input 'z'
+                # and re-calculate the FFT math during the backward pass.
+                z = checkpoint(create_custom_forward(layer), z, use_reentrant=False)
+            else:
+                z = create_custom_forward(layer)(z)
             z = dropout_layer(z)
             x = z + x # Residual connection
             if not self.prenorm:
@@ -463,6 +467,7 @@ class S4DCombinedModel(nn.Module):
                  regressor_dropout=0.0,
                  regressor_prenorm=False,
                  regressor_fc_hidden=[64, 32],
+                 regressor_gradient_checkpointing=False,
                  denoiser_ckpt_path=None,
                  regressor_ckpt_path=None):
         super().__init__()
@@ -485,6 +490,7 @@ class S4DCombinedModel(nn.Module):
             dropout=regressor_dropout,
             prenorm=regressor_prenorm,
             fc_hidden=regressor_fc_hidden,
+            gradient_checkpointing=regressor_gradient_checkpointing,
         )
 
         if denoiser_ckpt_path is not None:
