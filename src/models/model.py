@@ -235,7 +235,7 @@ class LitS4CombinedModel(BaseLightningModule):
 
     The total loss is a weighted sum::
 
-        loss = lambda_denoise * MSE(x_denoised, x_clean)
+        loss = lambda_denoise * denoising_loss(x_denoised, x_clean)
              + lambda_regress * regression_loss(y_pred, y)
 
     Both lambdas can be scheduled over epochs via
@@ -256,6 +256,15 @@ class LitS4CombinedModel(BaseLightningModule):
 
     If no schedule dict is provided the corresponding lambda stays constant.
     Both sub-losses and the current lambda values are logged every epoch.
+
+    Denoising loss options (``denoising_loss``):
+      - ``'MSELoss'``               – mean squared error (default)
+      - ``'HuberLoss'``             – Huber loss; set ``denoising_huber_delta``
+      - ``'WeightedMSELoss'``       – per-feature weighted MSE; set ``denoising_weights``
+      - ``'MixtureMSESpectralLoss'``– time + frequency domain MSE mix; set ``denoising_spectral_alpha``
+
+    Regression loss options (``loss``) are the same as :class:`BaseLightningModule`,
+    including ``'GaussianNLLLoss'``.
     """
 
     def __init__(self,
@@ -264,11 +273,26 @@ class LitS4CombinedModel(BaseLightningModule):
                  lambda_denoise_schedule: dict = None,
                  lambda_regress_schedule: dict = None,
                  trainer_max_epochs: int = 100,
+                 denoising_loss: str = 'MSELoss',
+                 denoising_weights=None,
+                 denoising_huber_delta: float = 1.0,
+                 denoising_spectral_alpha: float = 0.5,
                  **kwargs):
         super().__init__(trainer_max_epochs=trainer_max_epochs, **kwargs)
         self.lambda_denoise = lambda_denoise
         self.lambda_regress = lambda_regress
-        self.denoising_criterion = nn.MSELoss()
+
+        if denoising_loss == 'MSELoss':
+            self.denoising_criterion = nn.MSELoss()
+        elif denoising_loss == 'HuberLoss':
+            self.denoising_criterion = nn.HuberLoss(delta=denoising_huber_delta)
+        elif denoising_loss == 'WeightedMSELoss':
+            self.denoising_criterion = WeightedMSELoss(weights=denoising_weights)
+        elif denoising_loss == 'MixtureMSESpectralLoss':
+            self.denoising_criterion = MixtureMSESpectralLoss(alpha=denoising_spectral_alpha)
+        else:
+            raise ValueError(f'Unknown denoising loss function {denoising_loss!r}. '
+                             f'GaussianNLLLoss is not supported for sequence targets.')
 
         def _make_scheduler(schedule_cfg, default_value):
             if schedule_cfg is None:
