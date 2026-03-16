@@ -100,6 +100,7 @@ model:
         denoiser_prenorm: false
         denoiser_gradient_checkpointing: false
         # Regressor (S4DModel)
+        regressor_gradient_checkpointing: false
         regressor_d_model: 128
         regressor_n_layers: 6
         regressor_dropout: 0.0
