@@ -434,6 +434,88 @@ class S4DSeq2SeqModel(nn.Module):
         return x
 
 
+class S4DCombinedModel(nn.Module):
+    """Combined denoising + regression model.
+
+    Architecture:
+      1. **Denoiser** – an :class:`S4DSeq2SeqModel` that maps a noisy I/Q
+         sequence ``(B, L, d_input)`` to a denoised sequence of the same shape.
+      2. **Regressor** – an :class:`S4DModel` that reads the denoised sequence
+         and outputs a scalar prediction vector ``(B, d_output)``.
+
+    Both sub-networks are trained jointly end-to-end.  During inference
+    ``forward`` returns ``(x_denoised, y_pred)`` so callers can access both
+    the cleaned signal and the regression result.  An optional pre-trained
+    checkpoint can be supplied for either sub-network via ``denoiser_ckpt_path``
+    / ``regressor_ckpt_path``.
+    """
+
+    def __init__(self,
+                 d_input=2,
+                 d_output=2,
+                 denoiser_d_model=128,
+                 denoiser_n_layers=4,
+                 denoiser_dropout=0.0,
+                 denoiser_prenorm=False,
+                 denoiser_gradient_checkpointing=False,
+                 regressor_d_model=128,
+                 regressor_n_layers=4,
+                 regressor_dropout=0.0,
+                 regressor_prenorm=False,
+                 regressor_fc_hidden=[64, 32],
+                 denoiser_ckpt_path=None,
+                 regressor_ckpt_path=None):
+        super().__init__()
+
+        self.denoiser = S4DSeq2SeqModel(
+            d_input=d_input,
+            d_output=d_input,
+            d_model=denoiser_d_model,
+            n_layers=denoiser_n_layers,
+            dropout=denoiser_dropout,
+            prenorm=denoiser_prenorm,
+            gradient_checkpointing=denoiser_gradient_checkpointing,
+        )
+
+        self.regressor = S4DModel(
+            d_input=d_input,
+            d_output=d_output,
+            d_model=regressor_d_model,
+            n_layers=regressor_n_layers,
+            dropout=regressor_dropout,
+            prenorm=regressor_prenorm,
+            fc_hidden=regressor_fc_hidden,
+        )
+
+        if denoiser_ckpt_path is not None:
+            self._load_weights(self.denoiser, denoiser_ckpt_path, prefix='encoder.')
+        if regressor_ckpt_path is not None:
+            self._load_weights(self.regressor, regressor_ckpt_path, prefix='encoder.')
+
+    @staticmethod
+    def _load_weights(module, ckpt_path, prefix='encoder.'):
+        ckpt = torch.load(ckpt_path, map_location='cpu')
+        state_dict = ckpt.get('state_dict', ckpt)
+        sub_state = {
+            k[len(prefix):]: v
+            for k, v in state_dict.items()
+            if k.startswith(prefix)
+        }
+        missing, unexpected = module.load_state_dict(sub_state, strict=False)
+
+    def forward(self, x):
+        """
+        Args:
+            x: noisy I/Q tensor, shape ``(B, L, d_input)``
+        Returns:
+            x_denoised: denoised signal, shape ``(B, L, d_input)``
+            y_pred:     regression output, shape ``(B, d_output)``
+        """
+        x_denoised = self.denoiser(x)
+        y_pred = self.regressor(x_denoised)
+        return x_denoised, y_pred
+
+
 class S4D_S4D_GatedModel(nn.Module):
     def __init__(self,
                  output_dim=2,

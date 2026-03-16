@@ -274,3 +274,132 @@ class Project8SimDenoising(Dataset):
 
     def __del__(self):
         self.close()
+
+
+class Project8SimCombined(Dataset):
+    """Dataset for the combined denoising + regression task.
+
+    Returns ``(X_noisy, X_clean, y, obs)`` where:
+    - ``X_noisy`` – noisy I/Q signal normalised per channel, shape ``(cutoff, C)``
+    - ``X_clean`` – clean signal normalised by the *same* per-channel std as
+      ``X_noisy``, shape ``(cutoff, C)``
+    - ``y``       – normalised regression targets (e.g. energy, pitch angle)
+    - ``obs``     – observables (not normalised)
+    """
+
+    def __init__(self,
+                 inputs,
+                 variables,
+                 observables,
+                 data_dir,
+                 cutoff=4000,
+                 noise_const=1.0,
+                 apply_filter=False,
+                 norm=True):
+
+        data_dir = str(data_dir)
+        hdf5_files = sorted([
+            os.path.join(data_dir, f)
+            for f in os.listdir(data_dir)
+            if f.endswith('.hdf5') or f.endswith('.h5')
+        ])
+        if not hdf5_files:
+            raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
+
+        self.paths        = hdf5_files
+        self.inputs       = inputs
+        self.variables    = variables
+        self.observables  = observables
+        self.cutoff       = cutoff
+        self.noise_const  = noise_const
+        self.apply_filter = apply_filter
+        self.norm         = norm
+
+        self._index = []
+        for path in self.paths:
+            with h5py.File(path, 'r') as f:
+                n = f[inputs[0]].shape[0]
+            self._index.extend((path, i) for i in range(n))
+
+        if norm:
+            self.mu, self.stds = self._compute_norm_stats()
+        else:
+            self.mu = self.stds = None
+
+        self._file_handles: dict = {}
+
+    def _compute_norm_stats(self):
+        n_vars = len(self.variables)
+        count  = 0
+        mean   = np.zeros(n_vars, dtype=np.float64)
+        M2     = np.zeros(n_vars, dtype=np.float64)
+
+        for path in self.paths:
+            with h5py.File(path, 'r') as f:
+                data = np.stack([f[v][:] for v in self.variables], axis=1)
+            for row in data:
+                count += 1
+                delta  = row - mean
+                mean  += delta / count
+                M2    += delta * (row - mean)
+
+        return mean.astype(np.float32), np.sqrt(M2 / count).astype(np.float32)
+
+    def _get_handle(self, path):
+        if path not in self._file_handles:
+            self._file_handles[path] = h5py.File(path, 'r')
+        return self._file_handles[path]
+
+    def _read_row(self, path, local_idx, keys):
+        f = self._get_handle(path)
+        return {k: f[k][local_idx] for k in keys}
+
+    def __len__(self):
+        return len(self._index)
+
+    def __getitem__(self, idx):
+        path, local_idx = self._index[idx]
+        all_keys = self.inputs + self.variables + self.observables
+        row = self._read_row(path, local_idx, all_keys)
+
+        X_clean = np.stack([row[k] for k in self.inputs], axis=-1)[:self.cutoff]
+        X_noisy_norm = np.zeros_like(X_clean)
+        X_clean_norm = np.zeros_like(X_clean)
+
+        for j in range(X_clean.shape[1]):
+            noise = noise_model(self.cutoff, self.noise_const)
+            Xn = X_clean[:, j] + noise
+            if self.apply_filter:
+                Xn = bandpass_filter(Xn)
+            if self.norm:
+                s = np.std(Xn) + 1e-8
+                X_noisy_norm[:, j] = Xn / s
+                X_clean_norm[:, j] = X_clean[:, j] / s
+            else:
+                X_noisy_norm[:, j] = Xn
+                X_clean_norm[:, j] = X_clean[:, j]
+
+        y_raw    = np.array([row[v] for v in self.variables],   dtype=np.float32)
+        var_norm = (y_raw - self.mu) / (self.stds + 1e-8) if self.norm else y_raw
+        obs      = np.array([row[o] for o in self.observables], dtype=np.float32)
+
+        return (
+            torch.tensor(X_noisy_norm, dtype=torch.float32),
+            torch.tensor(X_clean_norm, dtype=torch.float32),
+            torch.tensor(var_norm,     dtype=torch.float32),
+            torch.tensor(obs,          dtype=torch.float32),
+        )
+
+    def __indim__(self):
+        return len(self.inputs)
+
+    def outdim(self):
+        return len(self.variables)
+
+    def close(self):
+        for fh in self._file_handles.values():
+            fh.close()
+        self._file_handles.clear()
+
+    def __del__(self):
+        self.close()

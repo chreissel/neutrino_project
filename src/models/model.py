@@ -226,6 +226,57 @@ class LitS4DualModel(BaseLightningModule):
         return loss
 
 
+class LitS4CombinedModel(BaseLightningModule):
+    """Lightning module for the combined denoising + regression task.
+
+    Expects batches of ``(X_noisy, X_clean, y, obs)`` as produced by
+    :class:`~src.data.data.LitCombinedDataModule`.  The encoder should be an
+    :class:`~src.models.networks.S4DCombinedModel`.
+
+    The total loss is a weighted sum::
+
+        loss = lambda_denoise * MSE(x_denoised, x_clean)
+             + lambda_regress * regression_loss(y_pred, y)
+
+    Both sub-losses are logged separately so you can monitor each component
+    during training.
+    """
+
+    def __init__(self, lambda_denoise: float = 1.0, lambda_regress: float = 1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.lambda_denoise = lambda_denoise
+        self.lambda_regress = lambda_regress
+        self.denoising_criterion = nn.MSELoss()
+        self.save_hyperparameters()
+
+    def forward(self, x):
+        return self.encoder(x)
+
+    def _shared_step(self, batch):
+        x_noisy, x_clean, y, _ = batch
+        x_denoised, y_preds = self.forward(x_noisy)
+        loss_denoise = self.denoising_criterion(x_denoised, x_clean)
+        loss_regress = self.__loss__(y, y_preds)
+        loss = self.lambda_denoise * loss_denoise + self.lambda_regress * loss_regress
+        return loss, loss_denoise, loss_regress
+
+    def training_step(self, batch, batch_idx):
+        loss, loss_denoise, loss_regress = self._shared_step(batch)
+        current_lr = self.optimizers().param_groups[0]['lr']
+        self.log("lr",                  current_lr,    on_step=False, on_epoch=True, logger=True)
+        self.log("train/loss",          loss,          on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/loss_denoise",  loss_denoise,  on_step=False, on_epoch=True, prog_bar=False)
+        self.log("train/loss_regress",  loss_regress,  on_step=False, on_epoch=True, prog_bar=False)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, loss_denoise, loss_regress = self._shared_step(batch)
+        self.log("val/loss",            loss,          on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/loss_denoise",    loss_denoise,  on_step=False, on_epoch=True, prog_bar=False)
+        self.log("val/loss_regress",    loss_regress,  on_step=False, on_epoch=True, prog_bar=False)
+        return loss
+
+
 class LitS4DenoisingModel(BaseLightningModule):
     """Lightning module for the S4D denoising task.
 
