@@ -9,7 +9,7 @@ import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
 from src.models.losses import WeightedMSELoss, MixtureMSESpectralLoss
-from src.models.curriculum_scheduler import NoiseScheduler
+from src.models.curriculum_scheduler import NoiseScheduler, LambdaScheduler
 from src.data.data import LitDataModule
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, CosineAnnealingLR
 
@@ -223,6 +223,102 @@ class LitS4DualModel(BaseLightningModule):
         y_preds = self.forward(ts_input, fft_input)
         loss = self.__loss__(y, y_preds)
         self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
+
+
+class LitS4CombinedModel(BaseLightningModule):
+    """Lightning module for the combined denoising + regression task.
+
+    Expects batches of ``(X_noisy, X_clean, y, obs)`` as produced by
+    :class:`~src.data.data.LitCombinedDataModule`.  The encoder should be an
+    :class:`~src.models.networks.S4DCombinedModel`.
+
+    The total loss is a weighted sum::
+
+        loss = lambda_denoise * MSE(x_denoised, x_clean)
+             + lambda_regress * regression_loss(y_pred, y)
+
+    Both lambdas can be scheduled over epochs via
+    :class:`~src.models.curriculum_scheduler.LambdaScheduler`.  Pass the
+    schedule configuration through ``lambda_denoise_schedule`` /
+    ``lambda_regress_schedule`` dicts, e.g.::
+
+        # Linear warm-up: denoise weight 1.0 → 0.1 over training
+        lambda_denoise_schedule:
+          schedule_type: linear
+          start_value: 1.0
+          end_value: 0.1
+
+        # Step: regress weight 0.0 for first 20 epochs, then 1.0
+        lambda_regress_schedule:
+          schedule_type: step
+          step_schedule: [[0, 0.0], [20, 1.0]]
+
+    If no schedule dict is provided the corresponding lambda stays constant.
+    Both sub-losses and the current lambda values are logged every epoch.
+    """
+
+    def __init__(self,
+                 lambda_denoise: float = 1.0,
+                 lambda_regress: float = 1.0,
+                 lambda_denoise_schedule: dict = None,
+                 lambda_regress_schedule: dict = None,
+                 trainer_max_epochs: int = 100,
+                 **kwargs):
+        super().__init__(trainer_max_epochs=trainer_max_epochs, **kwargs)
+        self.lambda_denoise = lambda_denoise
+        self.lambda_regress = lambda_regress
+        self.denoising_criterion = nn.MSELoss()
+
+        def _make_scheduler(schedule_cfg, default_value):
+            if schedule_cfg is None:
+                return LambdaScheduler(schedule_type='constant',
+                                       start_value=default_value,
+                                       total_epochs=trainer_max_epochs)
+            cfg = dict(schedule_cfg)
+            cfg.setdefault('start_value', default_value)
+            cfg.setdefault('total_epochs', trainer_max_epochs)
+            return LambdaScheduler(**cfg)
+
+        self.denoise_lambda_scheduler = _make_scheduler(lambda_denoise_schedule, lambda_denoise)
+        self.regress_lambda_scheduler = _make_scheduler(lambda_regress_schedule, lambda_regress)
+
+        self.save_hyperparameters()
+
+    def on_train_epoch_start(self):
+        # Update lambdas from their schedules, then call parent for curriculum noise
+        epoch = self.trainer.current_epoch
+        self.lambda_denoise = self.denoise_lambda_scheduler.get_lambda(epoch)
+        self.lambda_regress = self.regress_lambda_scheduler.get_lambda(epoch)
+        self.log("lambda/denoise", self.lambda_denoise, on_epoch=True, logger=True)
+        self.log("lambda/regress", self.lambda_regress, on_epoch=True, logger=True)
+        super().on_train_epoch_start()
+
+    def forward(self, x):
+        return self.encoder(x)
+
+    def _shared_step(self, batch):
+        x_noisy, x_clean, y, _ = batch
+        x_denoised, y_preds = self.forward(x_noisy)
+        loss_denoise = self.denoising_criterion(x_denoised, x_clean)
+        loss_regress = self.__loss__(y, y_preds)
+        loss = self.lambda_denoise * loss_denoise + self.lambda_regress * loss_regress
+        return loss, loss_denoise, loss_regress
+
+    def training_step(self, batch, batch_idx):
+        loss, loss_denoise, loss_regress = self._shared_step(batch)
+        current_lr = self.optimizers().param_groups[0]['lr']
+        self.log("lr",                  current_lr,    on_step=False, on_epoch=True, logger=True)
+        self.log("train/loss",          loss,          on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/loss_denoise",  loss_denoise,  on_step=False, on_epoch=True, prog_bar=False)
+        self.log("train/loss_regress",  loss_regress,  on_step=False, on_epoch=True, prog_bar=False)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, loss_denoise, loss_regress = self._shared_step(batch)
+        self.log("val/loss",            loss,          on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/loss_denoise",    loss_denoise,  on_step=False, on_epoch=True, prog_bar=False)
+        self.log("val/loss_regress",    loss_regress,  on_step=False, on_epoch=True, prog_bar=False)
         return loss
 
 
