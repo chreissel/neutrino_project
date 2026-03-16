@@ -35,10 +35,52 @@ data:
 model:
   class_path: src.models.model.LitS4CombinedModel
   init_args:
-    # Loss weights: total = lambda_denoise * MSE(denoised, clean)
-    #                     + lambda_regress * MSE(y_pred, y)
+    trainer_max_epochs: 80   # keep in sync with trainer.max_epochs
+
+    # ── Static loss weights ────────────────────────────────────────────────
+    # These are the initial / fallback values.  If a schedule is provided
+    # below, the value is overridden at the start of every epoch.
     lambda_denoise: 1.0
     lambda_regress: 1.0
+
+    # ── Lambda schedules ──────────────────────────────────────────────────
+    # Remove (or set to null) either block to keep the corresponding lambda
+    # fixed at its value above.
+    #
+    # schedule_type options:
+    #   'constant' – fixed value (start_value used throughout)
+    #   'linear'   – linearly interpolate start_value → end_value
+    #   'cosine'   – cosine annealing start_value → end_value
+    #   'step'     – piecewise constant; step_schedule is a list of
+    #                [epoch_threshold, value] breakpoints
+
+    # Example A – constant (same as no schedule):
+    lambda_denoise_schedule:
+      schedule_type: constant
+      start_value: 1.0
+
+    # Example B – linear ramp-down for regression weight:
+    #   lambda_regress starts at 0 and grows to 1 over training so the model
+    #   first focuses on denoising, then shifts attention to regression.
+    lambda_regress_schedule:
+      schedule_type: linear
+      start_value: 0.0
+      end_value: 1.0
+
+    # Example C – step schedule (uncomment to use instead of B):
+    # lambda_regress_schedule:
+    #   schedule_type: step
+    #   step_schedule:
+    #     - [0,  0.0]   # epochs  0–29: regression off
+    #     - [30, 0.5]   # epochs 30–59: regression at half weight
+    #     - [60, 1.0]   # epochs 60+:   regression at full weight
+
+    # Example D – cosine annealing denoising weight down to 0.1:
+    # lambda_denoise_schedule:
+    #   schedule_type: cosine
+    #   start_value: 1.0
+    #   end_value: 0.1
+
     loss: 'MSELoss'        # regression loss (denoising always uses MSELoss)
     learning_rate: 1e-3
     lr_schedule_type: reduce_on_plateau

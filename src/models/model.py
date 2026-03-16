@@ -9,7 +9,7 @@ import numpy as np
 from io import BytesIO
 import matplotlib.pyplot as plt
 from src.models.losses import WeightedMSELoss, MixtureMSESpectralLoss
-from src.models.curriculum_scheduler import NoiseScheduler
+from src.models.curriculum_scheduler import NoiseScheduler, LambdaScheduler
 from src.data.data import LitDataModule
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, CosineAnnealingLR
 
@@ -238,16 +238,61 @@ class LitS4CombinedModel(BaseLightningModule):
         loss = lambda_denoise * MSE(x_denoised, x_clean)
              + lambda_regress * regression_loss(y_pred, y)
 
-    Both sub-losses are logged separately so you can monitor each component
-    during training.
+    Both lambdas can be scheduled over epochs via
+    :class:`~src.models.curriculum_scheduler.LambdaScheduler`.  Pass the
+    schedule configuration through ``lambda_denoise_schedule`` /
+    ``lambda_regress_schedule`` dicts, e.g.::
+
+        # Linear warm-up: denoise weight 1.0 → 0.1 over training
+        lambda_denoise_schedule:
+          schedule_type: linear
+          start_value: 1.0
+          end_value: 0.1
+
+        # Step: regress weight 0.0 for first 20 epochs, then 1.0
+        lambda_regress_schedule:
+          schedule_type: step
+          step_schedule: [[0, 0.0], [20, 1.0]]
+
+    If no schedule dict is provided the corresponding lambda stays constant.
+    Both sub-losses and the current lambda values are logged every epoch.
     """
 
-    def __init__(self, lambda_denoise: float = 1.0, lambda_regress: float = 1.0, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self,
+                 lambda_denoise: float = 1.0,
+                 lambda_regress: float = 1.0,
+                 lambda_denoise_schedule: dict = None,
+                 lambda_regress_schedule: dict = None,
+                 trainer_max_epochs: int = 100,
+                 **kwargs):
+        super().__init__(trainer_max_epochs=trainer_max_epochs, **kwargs)
         self.lambda_denoise = lambda_denoise
         self.lambda_regress = lambda_regress
         self.denoising_criterion = nn.MSELoss()
+
+        def _make_scheduler(schedule_cfg, default_value):
+            if schedule_cfg is None:
+                return LambdaScheduler(schedule_type='constant',
+                                       start_value=default_value,
+                                       total_epochs=trainer_max_epochs)
+            cfg = dict(schedule_cfg)
+            cfg.setdefault('start_value', default_value)
+            cfg.setdefault('total_epochs', trainer_max_epochs)
+            return LambdaScheduler(**cfg)
+
+        self.denoise_lambda_scheduler = _make_scheduler(lambda_denoise_schedule, lambda_denoise)
+        self.regress_lambda_scheduler = _make_scheduler(lambda_regress_schedule, lambda_regress)
+
         self.save_hyperparameters()
+
+    def on_train_epoch_start(self):
+        # Update lambdas from their schedules, then call parent for curriculum noise
+        epoch = self.trainer.current_epoch
+        self.lambda_denoise = self.denoise_lambda_scheduler.get_lambda(epoch)
+        self.lambda_regress = self.regress_lambda_scheduler.get_lambda(epoch)
+        self.log("lambda/denoise", self.lambda_denoise, on_epoch=True, logger=True)
+        self.log("lambda/regress", self.lambda_regress, on_epoch=True, logger=True)
+        super().on_train_epoch_start()
 
     def forward(self, x):
         return self.encoder(x)
