@@ -27,31 +27,76 @@ class LitDataModule(GenericDataModule):
             max_noise_const=1.0,
             freq_transform = 'fft',
             q_params = None,
+            max_axial_freq=None,
+            max_cyc_freq=None,
+            multiplier=1,
             **kwargs):
         super().__init__(**kwargs)
         
         initial_noise_const = noise_const
-        self.use_curriculum_learning = use_curriculum_learning
+        self.use_curriculum_learning = use_curriculum_learning 
 
-        self.dataset = Project8Sim(
-            inputs, variables, observables, data_dir, cutoff, norm,
-            initial_noise_const, apply_filter, freq_transform, q_params
+        dummy = Project8Sim(
+            inputs=inputs,
+            variables=variables,
+            observables=observables,
+            data_dir=data_dir,
+            cutoff=cutoff,
+            norm=norm,
+            noise_const=initial_noise_const,
+            apply_filter=apply_filter,
+            freq_transform=freq_transform,
+            multiplier=1
         )
-        self.mu = self.dataset.mu
-        self.stds = self.dataset.stds
+        
+        self.mu = dummy.mu
+        self.stds = dummy.stds
         generator = torch.Generator().manual_seed(42)
-        self.train_dataset, self.val_dataset, self.test_dataset = random_split(self.dataset, [0.8,0.1,0.1], generator=generator)
+        train_split, val_split, test_split = random_split(range(len(dummy)), [0.8,0.1,0.1], generator=generator)
+        
+        self.train_indices = self._filter(dummy, train_split.indices, max_axial_freq, max_cyc_freq)
+        self.val_indices   = self._filter(dummy, val_split.indices, max_axial_freq, max_cyc_freq)
+        self.test_indices  = test_split.indices
+
+        dataset_conf = dict(
+            inputs=inputs, variables=variables, observables=observables,
+            data_dir=data_dir, cutoff=cutoff, norm=norm,
+            noise_const=noise_const, apply_filter=apply_filter,
+            freq_transform=freq_transform, q_params=q_params
+        )
+        
+        self.train_dataset = Project8Sim(**dataset_conf, multiplier=multiplier, is_train=True)
+        self.train_dataset.active_indices = self.train_indices
+        self.train_dataset.mu, self.train_dataset.stds = self.mu, self.stds
+
+        self.val_dataset = Project8Sim(**dataset_conf, multiplier=1, is_train=False)
+        self.val_dataset.active_indices = self.val_indices
+        self.val_dataset.mu, self.val_dataset.stds = self.mu, self.stds
+
+        self.test_dataset =Project8Sim(**dataset_conf, multiplier=1, is_train=False)
+        self.test_dataset.active_indices = self.test_indices
+        self.test_dataset.mu, self.test_dataset.stds = self.mu, self.stds
+       
         self.observables = observables
         self.variables = variables
-        self.input_channels_ts = self.dataset.__indim_ts__()
-        self.input_channels_fft = self.dataset.__indim_fft__()
-        self.input_channels_qtransform = self.dataset.__indim_qtransform__()
+        self.input_channels_ts = self.train_dataset.__indim_ts__()
+        self.input_channels_fft = self.train_dataset.__indim_fft__()
+        self.input_channels_qtransform = self.train_dataset.__indim_qtransform__()
         
         self.save_hyperparameters()
 
+    def _filter(self, dummy, indices, max_ax, max_cyc):
+        idx_arr = np.array(indices)
+        keep = np.ones(len(idx_arr), dtype=bool)
+        if max_ax and dummy.freq_metadata['axial'] is not None:
+            keep &= (dummy.freq_metadata['axial'][idx_arr] < max_ax)
+        if max_cyc and dummy.freq_metadata['cyc'] is not None:
+            keep &= (dummy.freq_metadata['cyc'][idx_arr] < max_cyc)
+        return idx_arr[keep].tolist()
+
     def set_noise_const(self, new_const):
         if self.use_curriculum_learning:
-            self.dataset.noise_const = new_const
+            self.train_dataset.noise_const = new_const
 
     def train_dataloader(self):
         loader = DataLoader(self.train_dataset,shuffle=True, **self.loader_kwargs)
