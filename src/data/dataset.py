@@ -315,7 +315,10 @@ class Project8SimCombined(Dataset):
                  cutoff=4000,
                  noise_const=1.0,
                  apply_filter=False,
-                 norm=True):
+                 norm=True,
+                 multiplier=1,
+                 is_train=False,
+                 **kwargs):
 
         data_dir = str(data_dir)
         hdf5_files = sorted([
@@ -334,12 +337,25 @@ class Project8SimCombined(Dataset):
         self.noise_const  = noise_const
         self.apply_filter = apply_filter
         self.norm         = norm
+        self.multiplier   = multiplier
+        self.is_train     = is_train
 
         self._index = []
+        self.freq_metadata = {'axial': [], 'cyc': []}  # cache for frequency cuts
+
         for path in self.paths:
             with h5py.File(path, 'r') as f:
                 n = f[inputs[0]].shape[0]
+                if 'avg_axial_frequency_Hz' in f:
+                    self.freq_metadata['axial'].append(f['avg_axial_frequency_Hz'][:])
+                if 'avg_carrier_frequency_Hz' in f:
+                    self.freq_metadata['cyc'].append(f['avg_carrier_frequency_Hz'][:])
             self._index.extend((path, i) for i in range(n))
+
+        self.active_indices = np.arange(len(self._index))
+
+        self.freq_metadata['axial'] = np.concatenate(self.freq_metadata['axial']) if self.freq_metadata['axial'] else None
+        self.freq_metadata['cyc']   = np.concatenate(self.freq_metadata['cyc'])   if self.freq_metadata['cyc']   else None
 
         if norm:
             self.mu, self.stds = self._compute_norm_stats()
@@ -375,10 +391,13 @@ class Project8SimCombined(Dataset):
         return {k: f[k][local_idx] for k in keys}
 
     def __len__(self):
-        return len(self._index)
+        base_len = len(self.active_indices)
+        return base_len * self.multiplier if self.is_train else base_len
 
     def __getitem__(self, idx):
-        path, local_idx = self._index[idx]
+        subset_idx = idx % len(self.active_indices)
+        global_idx = self.active_indices[subset_idx]
+        path, local_idx = self._index[global_idx]
         all_keys = self.inputs + self.variables + self.observables
         row = self._read_row(path, local_idx, all_keys)
 
