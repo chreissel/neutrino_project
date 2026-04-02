@@ -17,7 +17,10 @@ class Project8Sim(Dataset):
             noise_const=1,
             apply_filter=False,
             freq_transform='fft', # 'fft', 'qtransform', 'both', or None
-            q_params=None):
+            q_params=None,
+            multiplier=1,
+            is_train=False,
+            **kwargs):
 
         data_dir = str(data_dir)
         hdf5_files = sorted([
@@ -33,13 +36,14 @@ class Project8Sim(Dataset):
         self.inputs       = inputs
         self.variables    = variables
         self.observables  = observables
-        self.cutoff             = cutoff
-        self.norm               = norm
-        self.noise_const        = noise_const
-        self.apply_filter       = apply_filter
-        self.freq_transform     = freq_transform
+        self.cutoff       = cutoff
+        self.norm         = norm
+        self.noise_const  = noise_const
+        self.apply_filter = apply_filter
+        self.freq_transform = freq_transform
+        self.multiplier   = multiplier
+        self.is_train     = is_train
         self.deterministic_noise = False
-
         self.q_params = q_params or {
             'fs': 200e6, 'fmin': 1e6, 'fmax': 100e6,
             'q_value': 5.0, 'num_freqs': 100
@@ -47,11 +51,23 @@ class Project8Sim(Dataset):
 
         self._index = []
         self._file_lengths = {}
+
+        self.freq_metadata = {'axial': [], 'cyc': []}  # cache for frequency cuts
+
         for path in self.paths:
             with h5py.File(path, 'r') as f:
                 n = f[(variables + observables + inputs)[0]].shape[0]
+                if 'avg_axial_frequency_Hz' in f:
+                    self.freq_metadata['axial'].append(f['avg_axial_frequency_Hz'][:])
+                if 'avg_carrier_frequency_Hz' in f:
+                    self.freq_metadata['cyc'].append(f['avg_carrier_frequency_Hz'][:])
             self._file_lengths[path] = n
             self._index.extend((path, i) for i in range(n))
+
+        self.active_indices = np.arange(len(self._index))
+
+        self.freq_metadata['axial'] = np.concatenate(self.freq_metadata['axial']) if self.freq_metadata['axial'] else None
+        self.freq_metadata['cyc']   = np.concatenate(self.freq_metadata['cyc'])   if self.freq_metadata['cyc']   else None
 
         if norm:
             self.mu, self.stds = self._compute_norm_stats()
@@ -110,10 +126,13 @@ class Project8Sim(Dataset):
                          (imag - mu[1]) / (std[1] + 1e-8)], axis=-1)  # (cutoff, nf, 2)
 
     def __len__(self):
-        return len(self._index)
+        base_len = len(self.active_indices)
+        return base_len * self.multiplier if self.is_train else base_len
 
     def __getitem__(self, idx):
-        path, local_idx = self._index[idx]
+        subset_idx = idx % len(self.active_indices)
+        global_idx = self.active_indices[subset_idx]
+        path, local_idx = self._index[global_idx]
         row = self._read_row(path, local_idx, self.inputs + self.variables + self.observables)
 
         # inputs → (cutoff, n_inputs)
@@ -300,7 +319,10 @@ class Project8SimCombined(Dataset):
                  cutoff=4000,
                  noise_const=1.0,
                  apply_filter=False,
-                 norm=True):
+                 norm=True,
+                 multiplier=1,
+                 is_train=False,
+                 **kwargs):
 
         data_dir = str(data_dir)
         hdf5_files = sorted([
@@ -311,21 +333,34 @@ class Project8SimCombined(Dataset):
         if not hdf5_files:
             raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
 
-        self.paths               = hdf5_files
-        self.inputs              = inputs
-        self.variables           = variables
-        self.observables         = observables
-        self.cutoff              = cutoff
-        self.noise_const         = noise_const
-        self.apply_filter        = apply_filter
-        self.norm                = norm
+        self.paths        = hdf5_files
+        self.inputs       = inputs
+        self.variables    = variables
+        self.observables  = observables
+        self.cutoff       = cutoff
+        self.noise_const  = noise_const
+        self.apply_filter = apply_filter
+        self.norm         = norm
+        self.multiplier   = multiplier
+        self.is_train     = is_train
         self.deterministic_noise = False
 
         self._index = []
+        self.freq_metadata = {'axial': [], 'cyc': []}  # cache for frequency cuts
+
         for path in self.paths:
             with h5py.File(path, 'r') as f:
                 n = f[inputs[0]].shape[0]
+                if 'avg_axial_frequency_Hz' in f:
+                    self.freq_metadata['axial'].append(f['avg_axial_frequency_Hz'][:])
+                if 'avg_carrier_frequency_Hz' in f:
+                    self.freq_metadata['cyc'].append(f['avg_carrier_frequency_Hz'][:])
             self._index.extend((path, i) for i in range(n))
+
+        self.active_indices = np.arange(len(self._index))
+
+        self.freq_metadata['axial'] = np.concatenate(self.freq_metadata['axial']) if self.freq_metadata['axial'] else None
+        self.freq_metadata['cyc']   = np.concatenate(self.freq_metadata['cyc'])   if self.freq_metadata['cyc']   else None
 
         if norm:
             self.mu, self.stds = self._compute_norm_stats()
@@ -361,10 +396,13 @@ class Project8SimCombined(Dataset):
         return {k: f[k][local_idx] for k in keys}
 
     def __len__(self):
-        return len(self._index)
+        base_len = len(self.active_indices)
+        return base_len * self.multiplier if self.is_train else base_len
 
     def __getitem__(self, idx):
-        path, local_idx = self._index[idx]
+        subset_idx = idx % len(self.active_indices)
+        global_idx = self.active_indices[subset_idx]
+        path, local_idx = self._index[global_idx]
         all_keys = self.inputs + self.variables + self.observables
         row = self._read_row(path, local_idx, all_keys)
 
