@@ -58,6 +58,7 @@ class LitDataModule(GenericDataModule):
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
@@ -116,6 +117,7 @@ class LitDenoisingDataModule(GenericDataModule):
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
@@ -178,6 +180,7 @@ class LitCombinedDataModule(GenericDataModule):
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
