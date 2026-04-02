@@ -43,7 +43,7 @@ class Project8Sim(Dataset):
         self.freq_transform = freq_transform
         self.multiplier   = multiplier
         self.is_train     = is_train
-
+        self.deterministic_noise = False
         self.q_params = q_params or {
             'fs': 200e6, 'fmin': 1e6, 'fmax': 100e6,
             'q_value': 5.0, 'num_freqs': 100
@@ -140,7 +140,8 @@ class Project8Sim(Dataset):
         X_ts    = X_clean.copy()
 
         for j in range(X_ts.shape[1]):
-            noise  = noise_model(self.cutoff, self.noise_const)
+            rng    = np.random.default_rng(seed=idx * X_clean.shape[1] + j) if self.deterministic_noise else None
+            noise  = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn     = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
@@ -199,6 +200,7 @@ def worker_init_fn(worker_id):
     info = torch.utils.data.get_worker_info()
     if info is not None:
         info.dataset._file_handles = {}
+        np.random.seed(worker_id)
 
 
 class Project8SimDenoising(Dataset):
@@ -231,12 +233,13 @@ class Project8SimDenoising(Dataset):
         if not hdf5_files:
             raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
 
-        self.paths        = hdf5_files
-        self.inputs       = inputs
-        self.cutoff       = cutoff
-        self.noise_const  = noise_const
-        self.apply_filter = apply_filter
-        self.norm         = norm
+        self.paths               = hdf5_files
+        self.inputs              = inputs
+        self.cutoff              = cutoff
+        self.noise_const         = noise_const
+        self.apply_filter        = apply_filter
+        self.norm                = norm
+        self.deterministic_noise = False
 
         self._index = []
         for path in self.paths:
@@ -267,7 +270,8 @@ class Project8SimDenoising(Dataset):
         X_clean_norm = np.zeros_like(X_clean)
 
         for j in range(X_clean.shape[1]):
-            noise = noise_model(self.cutoff, self.noise_const)
+            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j) if self.deterministic_noise else None
+            noise = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
@@ -339,6 +343,7 @@ class Project8SimCombined(Dataset):
         self.norm         = norm
         self.multiplier   = multiplier
         self.is_train     = is_train
+        self.deterministic_noise = False
 
         self._index = []
         self.freq_metadata = {'axial': [], 'cyc': []}  # cache for frequency cuts
@@ -406,7 +411,8 @@ class Project8SimCombined(Dataset):
         X_clean_norm = np.zeros_like(X_clean)
 
         for j in range(X_clean.shape[1]):
-            noise = noise_model(self.cutoff, self.noise_const)
+            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j) if self.deterministic_noise else None
+            noise = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
