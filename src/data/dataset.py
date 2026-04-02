@@ -33,11 +33,12 @@ class Project8Sim(Dataset):
         self.inputs       = inputs
         self.variables    = variables
         self.observables  = observables
-        self.cutoff       = cutoff
-        self.norm         = norm
-        self.noise_const  = noise_const
-        self.apply_filter = apply_filter
-        self.freq_transform = freq_transform
+        self.cutoff             = cutoff
+        self.norm               = norm
+        self.noise_const        = noise_const
+        self.apply_filter       = apply_filter
+        self.freq_transform     = freq_transform
+        self.deterministic_noise = False
 
         self.q_params = q_params or {
             'fs': 200e6, 'fmin': 1e6, 'fmax': 100e6,
@@ -120,7 +121,7 @@ class Project8Sim(Dataset):
         X_ts    = X_clean.copy()
 
         for j in range(X_ts.shape[1]):
-            rng    = np.random.default_rng(seed=idx * X_clean.shape[1] + j)
+            rng    = np.random.default_rng(seed=idx * X_clean.shape[1] + j) if self.deterministic_noise else None
             noise  = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn     = X_clean[:, j] + noise
             if self.apply_filter:
@@ -213,12 +214,13 @@ class Project8SimDenoising(Dataset):
         if not hdf5_files:
             raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
 
-        self.paths        = hdf5_files
-        self.inputs       = inputs
-        self.cutoff       = cutoff
-        self.noise_const  = noise_const
-        self.apply_filter = apply_filter
-        self.norm         = norm
+        self.paths               = hdf5_files
+        self.inputs              = inputs
+        self.cutoff              = cutoff
+        self.noise_const         = noise_const
+        self.apply_filter        = apply_filter
+        self.norm                = norm
+        self.deterministic_noise = False
 
         self._index = []
         for path in self.paths:
@@ -249,7 +251,7 @@ class Project8SimDenoising(Dataset):
         X_clean_norm = np.zeros_like(X_clean)
 
         for j in range(X_clean.shape[1]):
-            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j)
+            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j) if self.deterministic_noise else None
             noise = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
@@ -309,14 +311,15 @@ class Project8SimCombined(Dataset):
         if not hdf5_files:
             raise FileNotFoundError(f"No HDF5 files found in directory: {data_dir}")
 
-        self.paths        = hdf5_files
-        self.inputs       = inputs
-        self.variables    = variables
-        self.observables  = observables
-        self.cutoff       = cutoff
-        self.noise_const  = noise_const
-        self.apply_filter = apply_filter
-        self.norm         = norm
+        self.paths               = hdf5_files
+        self.inputs              = inputs
+        self.variables           = variables
+        self.observables         = observables
+        self.cutoff              = cutoff
+        self.noise_const         = noise_const
+        self.apply_filter        = apply_filter
+        self.norm                = norm
+        self.deterministic_noise = False
 
         self._index = []
         for path in self.paths:
@@ -370,7 +373,7 @@ class Project8SimCombined(Dataset):
         X_clean_norm = np.zeros_like(X_clean)
 
         for j in range(X_clean.shape[1]):
-            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j)
+            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j) if self.deterministic_noise else None
             noise = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
