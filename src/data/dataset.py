@@ -120,7 +120,8 @@ class Project8Sim(Dataset):
         X_ts    = X_clean.copy()
 
         for j in range(X_ts.shape[1]):
-            noise  = noise_model(self.cutoff, self.noise_const)
+            rng    = np.random.default_rng(seed=idx * X_clean.shape[1] + j)
+            noise  = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn     = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
@@ -179,6 +180,7 @@ def worker_init_fn(worker_id):
     info = torch.utils.data.get_worker_info()
     if info is not None:
         info.dataset._file_handles = {}
+        np.random.seed(worker_id)
 
 
 class Project8SimDenoising(Dataset):
@@ -247,7 +249,8 @@ class Project8SimDenoising(Dataset):
         X_clean_norm = np.zeros_like(X_clean)
 
         for j in range(X_clean.shape[1]):
-            noise = noise_model(self.cutoff, self.noise_const)
+            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j)
+            noise = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
@@ -367,7 +370,8 @@ class Project8SimCombined(Dataset):
         X_clean_norm = np.zeros_like(X_clean)
 
         for j in range(X_clean.shape[1]):
-            noise = noise_model(self.cutoff, self.noise_const)
+            rng = np.random.default_rng(seed=idx * X_clean.shape[1] + j)
+            noise = noise_model(self.cutoff, self.noise_const, rng=rng)
             Xn = X_clean[:, j] + noise
             if self.apply_filter:
                 Xn = bandpass_filter(Xn)
