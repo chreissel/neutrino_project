@@ -50,8 +50,8 @@ class LitDataModule(GenericDataModule):
         train_split, val_split, test_split = random_split(range(len(dummy)), [0.8, 0.1, 0.1], generator=generator)
 
         self.train_indices = self._filter(dummy, train_split.indices, max_axial_freq, max_cyc_freq)
-        self.val_indices   = list(val_split.indices)
-        self.test_indices  = list(test_split.indices)
+        self.val_indices   = self._filter(dummy, val_split.indices,   max_axial_freq, max_cyc_freq)
+        self.test_indices  = test_split.indices
 
         dataset_conf = dict(
             inputs=inputs, variables=variables, observables=observables,
@@ -61,15 +61,15 @@ class LitDataModule(GenericDataModule):
         )
 
         self.train_dataset = Project8Sim(**dataset_conf, multiplier=multiplier, is_train=True)
-        self.train_dataset.active_indices = np.array(self.train_indices)
+        self.train_dataset.active_indices = self.train_indices
         self.train_dataset.mu, self.train_dataset.stds = self.mu, self.stds
 
         self.val_dataset = Project8Sim(**dataset_conf, multiplier=1, is_train=False)
-        self.val_dataset.active_indices = np.array(self.val_indices)
+        self.val_dataset.active_indices = self.val_indices
         self.val_dataset.mu, self.val_dataset.stds = self.mu, self.stds
 
         self.test_dataset = Project8Sim(**dataset_conf, multiplier=1, is_train=False)
-        self.test_dataset.active_indices = np.array(self.test_indices)
+        self.test_dataset.active_indices = self.test_indices
         self.test_dataset.mu, self.test_dataset.stds = self.mu, self.stds
 
         self.observables = observables
@@ -83,9 +83,9 @@ class LitDataModule(GenericDataModule):
     def _filter(self, dummy, indices, max_ax, max_cyc):
         idx_arr = np.array(indices)
         keep = np.ones(len(idx_arr), dtype=bool)
-        if max_ax is not None and dummy.freq_metadata['axial'] is not None:
+        if max_ax and dummy.freq_metadata['axial'] is not None:
             keep &= (dummy.freq_metadata['axial'][idx_arr] < max_ax)
-        if max_cyc is not None and dummy.freq_metadata['cyc'] is not None:
+        if max_cyc and dummy.freq_metadata['cyc'] is not None:
             keep &= (dummy.freq_metadata['cyc'][idx_arr] < max_cyc)
         return idx_arr[keep].tolist()
 
@@ -94,15 +94,12 @@ class LitDataModule(GenericDataModule):
             self.train_dataset.noise_const = new_const
 
     def train_dataloader(self):
-        self.train_dataset.deterministic_noise = False
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        self.val_dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        self.test_dataset.deterministic_noise = True
         return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
 
 
@@ -203,8 +200,8 @@ class LitCombinedDataModule(GenericDataModule):
         train_split, val_split, test_split = random_split(range(len(dummy)), [0.8, 0.1, 0.1], generator=generator)
 
         train_indices = self._filter(dummy, train_split.indices, max_axial_freq, max_cyc_freq)
-        val_indices   = list(val_split.indices)
-        test_indices  = list(test_split.indices)
+        val_indices   = self._filter(dummy, val_split.indices,   max_axial_freq, max_cyc_freq)
+        test_indices  = test_split.indices
 
         dataset_conf = dict(
             inputs=inputs, variables=variables, observables=observables,
@@ -213,15 +210,15 @@ class LitCombinedDataModule(GenericDataModule):
         )
 
         self.train_dataset = Project8SimCombined(**dataset_conf, multiplier=multiplier, is_train=True)
-        self.train_dataset.active_indices = np.array(train_indices)
+        self.train_dataset.active_indices = train_indices
         self.train_dataset.mu, self.train_dataset.stds = self.mu, self.stds
 
         self.val_dataset = Project8SimCombined(**dataset_conf, multiplier=1, is_train=False)
-        self.val_dataset.active_indices = np.array(val_indices)
+        self.val_dataset.active_indices = val_indices
         self.val_dataset.mu, self.val_dataset.stds = self.mu, self.stds
 
         self.test_dataset = Project8SimCombined(**dataset_conf, multiplier=1, is_train=False)
-        self.test_dataset.active_indices = np.array(test_indices)
+        self.test_dataset.active_indices = test_indices
         self.test_dataset.mu, self.test_dataset.stds = self.mu, self.stds
 
         self.input_channels = self.train_dataset.__indim__()
@@ -232,9 +229,9 @@ class LitCombinedDataModule(GenericDataModule):
     def _filter(self, dummy, indices, max_ax, max_cyc):
         idx_arr = np.array(indices)
         keep = np.ones(len(idx_arr), dtype=bool)
-        if max_ax is not None and dummy.freq_metadata['axial'] is not None:
+        if max_ax and dummy.freq_metadata['axial'] is not None:
             keep &= (dummy.freq_metadata['axial'][idx_arr] < max_ax)
-        if max_cyc is not None and dummy.freq_metadata['cyc'] is not None:
+        if max_cyc and dummy.freq_metadata['cyc'] is not None:
             keep &= (dummy.freq_metadata['cyc'][idx_arr] < max_cyc)
         return idx_arr[keep].tolist()
 
@@ -243,13 +240,10 @@ class LitCombinedDataModule(GenericDataModule):
             self.train_dataset.noise_const = new_const
 
     def train_dataloader(self):
-        self.train_dataset.deterministic_noise = False
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        self.val_dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        self.test_dataset.deterministic_noise = True
         return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
