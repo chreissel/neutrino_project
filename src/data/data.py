@@ -54,16 +54,16 @@ class LitDataModule(GenericDataModule):
             self.dataset.noise_const = new_const
 
     def train_dataloader(self):
-        loader = DataLoader(self.train_dataset,shuffle=True, **self.loader_kwargs)
-        return loader
+        self.dataset.deterministic_noise = False
+        return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        loader = DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
-        return loader
+        self.dataset.deterministic_noise = False
+        return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        loader = DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
-        return loader
+        self.dataset.deterministic_noise = True
+        return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
 
 
 class LitDenoisingDataModule(GenericDataModule):
@@ -113,12 +113,15 @@ class LitDenoisingDataModule(GenericDataModule):
             self.dataset.noise_const = new_const
 
     def train_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
+        self.dataset.deterministic_noise = True
         return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
 
 
@@ -173,10 +176,13 @@ class LitCombinedDataModule(GenericDataModule):
             self.dataset.noise_const = new_const
 
     def train_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
+        self.dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
+        self.dataset.deterministic_noise = True
         return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)

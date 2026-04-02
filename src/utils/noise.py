@@ -12,12 +12,14 @@ from scipy.signal import butter, filtfilt
 #
 # OUTPUTS
 #    Noise array of length len_array
-def noise_model(len_array, constant=1): 
+def noise_model(len_array, constant=1, rng=None):
     sampling_freq = 403E6
     mu = 0
-    R = 50 #ohms                                                                                                                                                                                                                                                                                                                                                            
-    sigma = np.sqrt(R * 0.5) * np.sqrt(2.2e-13 * constant * sampling_freq) # for correct SNR, per Penny                                                                                                                                                                                                                                                                     
-    return np.random.normal(mu, sigma, len_array)
+    R = 50 #ohms
+    sigma = np.sqrt(R * 0.5) * np.sqrt(2.2e-13 * constant * sampling_freq) # for correct SNR, per Penny
+    if rng is None:
+        return np.random.normal(mu, sigma, len_array)
+    return rng.normal(mu, sigma, len_array)
 
 # Butterworth bandpass filter
 # lowcut and highcut should be chosen based on expected range of the cavity bandwidth
