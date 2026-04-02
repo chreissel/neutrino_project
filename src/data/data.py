@@ -50,8 +50,8 @@ class LitDataModule(GenericDataModule):
         train_split, val_split, test_split = random_split(range(len(dummy)), [0.8, 0.1, 0.1], generator=generator)
 
         self.train_indices = self._filter(dummy, train_split.indices, max_axial_freq, max_cyc_freq)
-        self.val_indices   = self._filter(dummy, val_split.indices,   max_axial_freq, max_cyc_freq)
-        self.test_indices  = test_split.indices
+        self.val_indices   = list(val_split.indices)
+        self.test_indices  = list(test_split.indices)
 
         dataset_conf = dict(
             inputs=inputs, variables=variables, observables=observables,
@@ -94,15 +94,15 @@ class LitDataModule(GenericDataModule):
             self.train_dataset.noise_const = new_const
 
     def train_dataloader(self):
-        self.dataset.deterministic_noise = False
+        self.train_dataset.deterministic_noise = False
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        self.dataset.deterministic_noise = False
+        self.val_dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        self.dataset.deterministic_noise = True
+        self.test_dataset.deterministic_noise = True
         return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
 
 
@@ -203,8 +203,8 @@ class LitCombinedDataModule(GenericDataModule):
         train_split, val_split, test_split = random_split(range(len(dummy)), [0.8, 0.1, 0.1], generator=generator)
 
         train_indices = self._filter(dummy, train_split.indices, max_axial_freq, max_cyc_freq)
-        val_indices   = self._filter(dummy, val_split.indices,   max_axial_freq, max_cyc_freq)
-        test_indices  = test_split.indices
+        val_indices   = list(val_split.indices)
+        test_indices  = list(test_split.indices)
 
         dataset_conf = dict(
             inputs=inputs, variables=variables, observables=observables,
@@ -243,13 +243,13 @@ class LitCombinedDataModule(GenericDataModule):
             self.train_dataset.noise_const = new_const
 
     def train_dataloader(self):
-        self.dataset.deterministic_noise = False
+        self.train_dataset.deterministic_noise = False
         return DataLoader(self.train_dataset, shuffle=True, **self.loader_kwargs)
 
     def val_dataloader(self):
-        self.dataset.deterministic_noise = False
+        self.val_dataset.deterministic_noise = False
         return DataLoader(self.val_dataset, shuffle=False, **self.loader_kwargs)
 
     def test_dataloader(self):
-        self.dataset.deterministic_noise = True
+        self.test_dataset.deterministic_noise = True
         return DataLoader(self.test_dataset, shuffle=False, **self.loader_kwargs)
