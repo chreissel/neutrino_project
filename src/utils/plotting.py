@@ -21,7 +21,38 @@ plt.rc('figure', titlesize=BIG_SIZE)  # fontsize of the figure title
 
 def gaussian(x, amplitude, mean, stddev):
         return amplitude * np.exp(-((x - mean) / stddev)**2 / 2)
-    
+
+def compute_fwhm(values, bins):
+    hist, edges = np.histogram(values, bins=bins, density=True)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    peak = np.max(hist)
+    half_max = peak / 2.0
+
+    above = hist >= half_max
+    indices = np.where(above)[0]
+    if len(indices) < 2:
+        return np.nan  # not well-defined
+
+    left_idx = indices[0]
+    right_idx = indices[-1]
+
+    def interp_x(i1, i2):
+        x1, x2 = centers[i1], centers[i2]
+        y1, y2 = hist[i1], hist[i2]
+        return x1 + (half_max - y1) * (x2 - x1) / (y2 - y1)
+
+    if left_idx > 0:
+        x_left = interp_x(left_idx - 1, left_idx)
+    else:
+        x_left = centers[left_idx]
+
+    if right_idx < len(hist) - 1:
+        x_right = interp_x(right_idx, right_idx + 1)
+    else:
+        x_right = centers[right_idx]
+
+    return x_right - x_left
+
 def get_label_unit(var):
     # Generate useful values for plotting
     # 
@@ -139,45 +170,57 @@ def make_bias(variables, true, pred):
 
     return fig
 
-def make_res(variables, true, pred):
-    # Extract the resolution using a Gaussian fit
+def make_res(variables, true, pred, fit_gaussian=True):
+    # Extract the resolution using FWHM estimation and an optional Gaussian fit
     #
     # INPUTS
     #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
     #    true: array of true values from the model
     #    pred: array of predicted values from the model
+    #    fit_gaussian: if True, overlay a Gaussian fit on the histogram (default: True)
     #
     # OUTPUTS
     #    fig: figure with the plot
-    
+
     # There will be one plot per variable
     fig, ax = plt.subplots(1, len(variables), figsize=(4*len(variables), 4), squeeze=False)
     # Loop over the variables
     for vind, var in enumerate(variables):
         var_label, var_unit, diff_unit, factor, diff_factor = get_label_unit(var)
-        
+
         # Divide by factor to get the desired units
         true_var = true[:, vind]
         pred_var = pred[:, vind]
         diff = (true_var-pred_var)/diff_factor
-        
-        hist, bins, _ = ax[0, vind].hist(diff,bins=np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 2500),weights=np.ones(len(true_var))*1/float(len(true_var)))
-        bincenters = (bins[:-1] + bins[1:]) / 2
-        popt, pcov = curve_fit(gaussian, bincenters, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
-        amplitude_fit, mean_fit, stddev_fit = popt
 
-        x_fit = np.linspace(min(bins), max(bins), 1000)
-        ax[0, vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
-        ax[0, vind].set_xlim(-5*stddev_fit, 5*stddev_fit)
+        bins = np.linspace(np.mean(diff)-5*np.std(diff), np.mean(diff)+5*np.std(diff), 2500)
+        hist, bins_out, _ = ax[0, vind].hist(diff, bins=bins, weights=np.ones(len(true_var))*1/float(len(true_var)))
+        bincenters = (bins_out[:-1] + bins_out[1:]) / 2
+
+        # Always compute and display FWHM
+        fwhm = compute_fwhm(diff, bins)
+        ax[0, vind].axvline(np.mean(diff) - fwhm/2, color='b', ls=':', lw=1)
+        ax[0, vind].axvline(np.mean(diff) + fwhm/2, color='b', ls=':', lw=1, label='FWHM={:.4f} {}'.format(fwhm, diff_unit))
+
+        if fit_gaussian:
+            try:
+                popt, pcov = curve_fit(gaussian, bincenters, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
+                amplitude_fit, mean_fit, stddev_fit = popt
+                x_fit = np.linspace(min(bins_out), max(bins_out), 1000)
+                ax[0, vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
+                ax[0, vind].set_xlim(-5*stddev_fit, 5*stddev_fit)
+            except Exception:
+                pass
+
         ax[0, vind].set_xlabel('residual '+var_label+ ' '+'['+diff_unit+']')
         ax[0, vind].set_ylabel('A.U.')
         ax[0, vind].legend()
-        
+
     plt.tight_layout()
-    
+
     return fig
     
-def make_energy_res(variables, observables, true, pred, meta):
+def make_energy_res(variables, observables, true, pred, meta, fit_gaussian=True):
     # Plot the energy resolution as a function of all variables.  The mean and stddev of the events in each bin are plotted
     # The goal is to determine whether the energy resolution is better in certain regions of the parameter space
     #
@@ -185,6 +228,7 @@ def make_energy_res(variables, observables, true, pred, meta):
     #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
     #    true: array of true values from the model
     #    pred: array of predicted values from the model
+    #    fit_gaussian: if True, use Gaussian fits to extract mean/std per bin; if False, use mean and FWHM/2.355 (default: True)
     #
     # OUTPUTS
     #    fig: figure with the plot
@@ -224,19 +268,25 @@ def make_energy_res(variables, observables, true, pred, meta):
                 stds.append(np.nan)
                 lens.append(np.nan)
                 continue
-            hist, bins, _ = ax[0, vind].hist(energy_diff,bins=100)
-            ax[0, vind].clear()
-            bincenters_g = (bins[:-1] + bins[1:]) / 2
-            try:
-                popt, pcov = curve_fit(gaussian, bincenters_g, hist, p0=[max(hist), np.mean(energy_diff), np.std(energy_diff)])
-                amplitude_fit, mean_fit, stddev_fit = popt
-                means.append(mean_fit)
-                stds.append(np.abs(stddev_fit))   # added absolute value
+            fwhm = compute_fwhm(energy_diff, 100)
+            if fit_gaussian:
+                hist, bins, _ = ax[0, vind].hist(energy_diff, bins=100)
+                ax[0, vind].clear()
+                bincenters_g = (bins[:-1] + bins[1:]) / 2
+                try:
+                    popt, pcov = curve_fit(gaussian, bincenters_g, hist, p0=[max(hist), np.mean(energy_diff), np.std(energy_diff)])
+                    amplitude_fit, mean_fit, stddev_fit = popt
+                    means.append(mean_fit)
+                    stds.append(np.abs(stddev_fit))   # added absolute value
+                    lens.append(len(energy_diff))
+                except:
+                    means.append(np.nan)
+                    stds.append(np.nan)
+                    lens.append(np.nan)
+            else:
+                means.append(np.mean(energy_diff))
+                stds.append(fwhm / 2.3548)  # convert FWHM to sigma-equivalent
                 lens.append(len(energy_diff))
-            except:
-                means.append(np.nan)
-                stds.append(np.nan)
-                lens.append(np.nan)
 
         if(maxnum==0):
             maxnum = np.nanmax(lens) + 10
@@ -306,7 +356,7 @@ def make_all_vs_all(variables, observables, true, pred, meta):
 
     return fig
 
-def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs=False):
+def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs=False, fit_gaussian=True):
     print(folder)
     # Make all plots
     #
@@ -314,17 +364,18 @@ def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs
     #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
     #    true: array of true values from the model
     #    pred: array of predicted values from the model
+    #    fit_gaussian: if True, overlay Gaussian fits on residual histograms (default: True)
     # OUTPUTS
     #    res, bias, all_vs_all, energy_res: figures to be saved later, if desired
-    
+
     dist = make_distribution(variables, observables, true, meta)
-    res = make_res(variables, true, pred)
+    res = make_res(variables, true, pred, fit_gaussian=fit_gaussian)
     bias = make_bias(variables, true, pred)
     all_vs_all = make_all_vs_all(variables, observables, true, pred, meta)
     # Only make the energy resolution plot if the energy variable is present
-    
+
     if 'energy_eV' in variables:
-        energy_res, nums = make_energy_res(variables, observables, true, pred, meta)
+        energy_res, nums = make_energy_res(variables, observables, true, pred, meta, fit_gaussian=fit_gaussian)
     
     if(savefigs):
         if(folder==[]):
