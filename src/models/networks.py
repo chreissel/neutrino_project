@@ -2,6 +2,7 @@ from torch import nn, optim
 import torch
 import torch.nn.functional as F
 from src.models.s4d import S4D, DropoutNd
+from src.models.linoss import LinOSSLayer
 from torch.utils.checkpoint import checkpoint
 
 activations = {
@@ -611,3 +612,244 @@ class S4D_S4D_GatedModel(nn.Module):
         f_fused = self.gated_fusion_layer(f_ts=f_ts_aligned, f_fft=f_fft)
         output = self.final_mlp(f_fused)
         return output
+
+
+# =============================================================================
+# LinOSS-based models  (drop-in replacements for the S4D equivalents above)
+# =============================================================================
+
+class LinOSSModel(nn.Module):
+    """LinOSS regression model — drop-in replacement for S4DModel.
+
+    Stacks ``n_layers`` :class:`~src.models.linoss.LinOSSLayer` blocks with
+    residual connections and LayerNorm, then mean-pools over the sequence and
+    applies an MLP decoder.
+
+    Input  : (B, L, d_input)
+    Output : (B, d_output)
+    """
+
+    def __init__(self,
+                 d_input, d_output,
+                 d_model=256, n_layers=4, dropout=0.2, prenorm=False,
+                 fc_hidden=[128, 64, 32],
+                 ssm_size=64, discretization='IM',
+                 gradient_checkpointing=False):
+        super().__init__()
+        self.d_output = d_output
+        self.prenorm  = prenorm
+        self.gradient_checkpointing = gradient_checkpointing
+
+        self.encoder = nn.Linear(d_input, d_model)
+
+        self.linoss_layers = nn.ModuleList()
+        self.norms         = nn.ModuleList()
+        self.dropouts      = nn.ModuleList()
+        for _ in range(n_layers):
+            self.linoss_layers.append(
+                LinOSSLayer(d_model, ssm_size=ssm_size,
+                            discretization=discretization,
+                            dropout=dropout,
+                            lr=min(0.001, 0.01))
+            )
+            self.norms.append(nn.LayerNorm(d_model))
+            self.dropouts.append(nn.Dropout(dropout))
+
+        self.decoder = MLP(d_model, fc_hidden, d_output)
+
+    def forward(self, x):
+        x = self.encoder(x)        # (B, L, d_input) → (B, L, d_model)
+        x = x.transpose(-1, -2)    # (B, d_model, L)  — LinOSSLayer wants (B, H, L)
+
+        for layer, norm, drop in zip(self.linoss_layers, self.norms, self.dropouts):
+            def _fwd(module):
+                def _inner(inp):
+                    out, _ = module(inp)
+                    return out
+                return _inner
+
+            z = x
+            if self.prenorm:
+                z = norm(z.transpose(-1, -2)).transpose(-1, -2)
+            if self.gradient_checkpointing:
+                z = checkpoint(_fwd(layer), z, use_reentrant=False)
+            else:
+                z = _fwd(layer)(z)
+            z = drop(z)
+            x = z + x
+            if not self.prenorm:
+                x = norm(x.transpose(-1, -2)).transpose(-1, -2)
+
+        x = x.transpose(-1, -2)    # (B, L, d_model)
+        x = x.mean(dim=1)          # (B, d_model)  — mean pool over sequence
+        x = self.decoder(x)        # (B, d_output)
+        return x
+
+
+class LinOSSSeq2SeqModel(nn.Module):
+    """LinOSS sequence-to-sequence model for denoising.
+
+    Preserves the full sequence length — no pooling over the time axis.
+    Intended for tasks where the target has the same shape as the input,
+    e.g. removing noise from an I/Q signal.
+
+    Input  : (B, L, d_input)
+    Output : (B, L, d_output)
+    """
+
+    def __init__(self,
+                 d_input, d_output,
+                 d_model=128, n_layers=4, dropout=0.0, prenorm=False,
+                 ssm_size=64, discretization='IM',
+                 gradient_checkpointing=False):
+        super().__init__()
+        self.prenorm = prenorm
+        self.gradient_checkpointing = gradient_checkpointing
+
+        self.encoder = nn.Linear(d_input, d_model)
+
+        self.linoss_layers = nn.ModuleList()
+        self.norms         = nn.ModuleList()
+        self.dropouts      = nn.ModuleList()
+        for _ in range(n_layers):
+            self.linoss_layers.append(
+                LinOSSLayer(d_model, ssm_size=ssm_size,
+                            discretization=discretization,
+                            dropout=dropout,
+                            lr=min(0.001, 0.01))
+            )
+            self.norms.append(nn.LayerNorm(d_model))
+            self.dropouts.append(nn.Dropout(dropout))
+
+        # Per-timestep linear decoder — no mean-pool over L
+        self.decoder = nn.Linear(d_model, d_output)
+
+    def forward(self, x):
+        # x: (B, L, d_input)
+        x = self.encoder(x)        # (B, L, d_model)
+        x = x.transpose(-1, -2)    # (B, d_model, L)
+
+        for layer, norm, drop in zip(self.linoss_layers, self.norms, self.dropouts):
+            def _fwd(module):
+                def _inner(inp):
+                    out, _ = module(inp)
+                    return out
+                return _inner
+
+            z = x
+            if self.prenorm:
+                z = norm(z.transpose(-1, -2)).transpose(-1, -2)
+            if self.gradient_checkpointing:
+                z = checkpoint(_fwd(layer), z, use_reentrant=False)
+            else:
+                z = _fwd(layer)(z)
+            z = drop(z)
+            x = z + x
+            if not self.prenorm:
+                x = norm(x.transpose(-1, -2)).transpose(-1, -2)
+
+        x = x.transpose(-1, -2)    # (B, L, d_model)
+        x = self.decoder(x)        # (B, L, d_output)  — no pooling
+        return x
+
+
+class LinOSSCombinedModel(nn.Module):
+    """Combined denoising + regression model using LinOSS layers.
+
+    Architecture mirrors :class:`S4DCombinedModel` exactly, replacing the
+    S4D layers with :class:`~src.models.linoss.LinOSSLayer`.
+
+    1. **Denoiser** – a :class:`LinOSSSeq2SeqModel` that maps a noisy I/Q
+       sequence ``(B, L, d_input)`` to a denoised sequence of the same shape.
+    2. **Regressor** – a :class:`LinOSSModel` that reads the denoised sequence
+       and outputs a scalar prediction vector ``(B, d_output)``.
+
+    Both sub-networks are trained jointly.  ``forward`` returns
+    ``(x_denoised, y_pred)`` for compatibility with
+    :class:`~src.models.model.LitS4CombinedModel`.
+
+    Discretization note
+    -------------------
+    ``'IM'`` (implicit) is the recommended default for denoising + regression:
+    it provides dissipative dynamics (eigenvalue magnitude < 1) which aid
+    stable training.  Use ``'IMEX'`` for its time-reversibility guarantee if
+    the task involves long-horizon forecasting.
+    """
+
+    def __init__(self,
+                 d_input=2,
+                 d_output=2,
+                 # Denoiser
+                 denoiser_d_model=128,
+                 denoiser_n_layers=4,
+                 denoiser_dropout=0.0,
+                 denoiser_prenorm=False,
+                 denoiser_ssm_size=64,
+                 denoiser_discretization='IM',
+                 denoiser_gradient_checkpointing=False,
+                 # Regressor
+                 regressor_d_model=128,
+                 regressor_n_layers=4,
+                 regressor_dropout=0.0,
+                 regressor_prenorm=False,
+                 regressor_fc_hidden=[64, 32],
+                 regressor_ssm_size=64,
+                 regressor_discretization='IM',
+                 regressor_gradient_checkpointing=False,
+                 # Optional warm-start checkpoints
+                 denoiser_ckpt_path=None,
+                 regressor_ckpt_path=None):
+        super().__init__()
+
+        self.denoiser = LinOSSSeq2SeqModel(
+            d_input=d_input,
+            d_output=d_input,
+            d_model=denoiser_d_model,
+            n_layers=denoiser_n_layers,
+            dropout=denoiser_dropout,
+            prenorm=denoiser_prenorm,
+            ssm_size=denoiser_ssm_size,
+            discretization=denoiser_discretization,
+            gradient_checkpointing=denoiser_gradient_checkpointing,
+        )
+
+        self.regressor = LinOSSModel(
+            d_input=d_input,
+            d_output=d_output,
+            d_model=regressor_d_model,
+            n_layers=regressor_n_layers,
+            dropout=regressor_dropout,
+            prenorm=regressor_prenorm,
+            fc_hidden=regressor_fc_hidden,
+            ssm_size=regressor_ssm_size,
+            discretization=regressor_discretization,
+            gradient_checkpointing=regressor_gradient_checkpointing,
+        )
+
+        if denoiser_ckpt_path is not None:
+            self._load_weights(self.denoiser, denoiser_ckpt_path, prefix='encoder.')
+        if regressor_ckpt_path is not None:
+            self._load_weights(self.regressor, regressor_ckpt_path, prefix='encoder.')
+
+    @staticmethod
+    def _load_weights(module, ckpt_path, prefix='encoder.'):
+        ckpt = torch.load(ckpt_path, map_location='cpu')
+        state_dict = ckpt.get('state_dict', ckpt)
+        sub_state = {
+            k[len(prefix):]: v
+            for k, v in state_dict.items()
+            if k.startswith(prefix)
+        }
+        module.load_state_dict(sub_state, strict=False)
+
+    def forward(self, x):
+        """
+        Args:
+            x : noisy I/Q tensor, shape ``(B, L, d_input)``
+        Returns:
+            x_denoised : denoised signal,  shape ``(B, L, d_input)``
+            y_pred     : regression output, shape ``(B, d_output)``
+        """
+        x_denoised = self.denoiser(x)
+        y_pred     = self.regressor(x_denoised)
+        return x_denoised, y_pred

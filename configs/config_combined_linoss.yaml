@@ -1,0 +1,94 @@
+trainer:
+  accelerator: auto
+  default_root_dir: 'runs/combined_linoss/'
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/loss
+        mode: min
+        save_top_k: 1
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        patience: 10
+        mode: min
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+  log_every_n_steps: 1
+  max_epochs: 80
+
+data:
+  class_path: src.data.data.LitCombinedDataModule
+  init_args:
+    inputs: ['output_ts_I', 'output_ts_Q']
+    variables: ['energy_eV', 'pitch_angle_deg']
+    observables: ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
+    data_dir: '/path/to/data/'   # <-- update to your HDF5 directory
+    batch_size: 128
+    num_workers: 4
+    cutoff: 8192
+    noise_const: 1.0
+    apply_filter: false
+    use_curriculum_learning: false
+
+model:
+  class_path: src.models.model.LitS4CombinedModel
+  init_args:
+    trainer_max_epochs: 80   # keep in sync with trainer.max_epochs
+
+    # ── Static loss weights ────────────────────────────────────────────────
+    lambda_denoise: 1.0
+    lambda_regress: 1.0
+
+    # ── Lambda schedules ──────────────────────────────────────────────────
+    # Curriculum: first focus on denoising, then ramp up regression weight.
+    lambda_denoise_schedule:
+      schedule_type: constant
+      start_value: 1.0
+
+    lambda_regress_schedule:
+      schedule_type: linear
+      start_value: 0.0
+      end_value: 1.0
+
+    # ── Denoising loss ────────────────────────────────────────────────────
+    denoising_loss: 'MSELoss'
+
+    # ── Regression loss ───────────────────────────────────────────────────
+    loss: 'MSELoss'
+    learning_rate: 1e-3
+    lr_schedule_type: reduce_on_plateau
+    gamma: 0.25
+    lr_patience: 5
+    threshold: 1e-3
+    lr_min: 1e-6
+
+    encoder:
+      class_path: src.models.networks.LinOSSCombinedModel
+      init_args:
+        d_input: 2            # must match len(inputs)
+        d_output: 2           # must match len(variables)
+
+        # ── Denoiser (LinOSSSeq2SeqModel) ──────────────────────────────
+        denoiser_d_model: 128
+        denoiser_n_layers: 6
+        denoiser_dropout: 0.0
+        denoiser_prenorm: false
+        denoiser_ssm_size: 64          # state-space dim P (analogous to d_state in S4D)
+        denoiser_discretization: 'IM'  # 'IM' (dissipative) or 'IMEX' (symplectic)
+        denoiser_gradient_checkpointing: false
+
+        # ── Regressor (LinOSSModel) ────────────────────────────────────
+        regressor_d_model: 128
+        regressor_n_layers: 6
+        regressor_dropout: 0.0
+        regressor_prenorm: false
+        regressor_fc_hidden: [64, 32]
+        regressor_ssm_size: 64
+        regressor_discretization: 'IM'
+        regressor_gradient_checkpointing: false
+
+        # ── Optional warm-start from pre-trained checkpoints ──────────
+        denoiser_ckpt_path: null
+        regressor_ckpt_path: null
