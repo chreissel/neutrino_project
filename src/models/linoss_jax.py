@@ -321,3 +321,219 @@ def linoss_layer_apply(A_diag_raw, B, C, D, steps_raw, discretization,
 
     Du = jax.vmap(lambda u: D * u)(input_sequence)
     return ys + Du
+
+
+# ---------------------------------------------------------------------------
+# Equinox model classes for the pure-JAX training pipeline
+# (used by scripts/train_linoss_jax.py and src/data/dataset_jax.py)
+# ---------------------------------------------------------------------------
+
+class LinOSSSeq2SeqJAX(eqx.Module):
+    """Sequence-to-sequence denoiser built from ``LinOSSBlock`` layers.
+
+    Maps ``(L, d_input) → (L, d_input)`` — used as the denoising stage of
+    ``LinOSSCombinedJAX``.
+
+    All ``LinOSSBlock`` layers contain ``eqx.nn.BatchNorm``; construct via
+    ``eqx.nn.make_with_state`` to obtain the initial state object::
+
+        model, state = eqx.nn.make_with_state(LinOSSSeq2SeqJAX)(...)
+    """
+
+    encoder : eqx.nn.Linear
+    blocks  : list          # List[LinOSSBlock]
+    decoder : eqx.nn.Linear
+
+    def __init__(
+        self,
+        d_input        : int,
+        d_model        : int,
+        n_layers       : int,
+        ssm_size       : int   = 64,
+        discretization : str   = 'IM',
+        dropout        : float = 0.0,
+        *,
+        key            : jax.Array,
+    ):
+        enc_key, *blk_keys, dec_key = jr.split(key, n_layers + 2)
+        self.encoder = eqx.nn.Linear(d_input, d_model, key=enc_key)
+        self.blocks  = [
+            LinOSSBlock(ssm_size, d_model, discretization, drop_rate=dropout, key=k)
+            for k in blk_keys
+        ]
+        self.decoder = eqx.nn.Linear(d_model, d_input, key=dec_key)
+
+    def __call__(
+        self,
+        x     : jax.Array,   # (L, d_input)
+        state : eqx.nn.State,
+        *,
+        key   : jax.Array,
+    ):
+        """Forward pass for a single (un-batched) sequence."""
+        x = jax.vmap(self.encoder)(x)                           # (L, d_model)
+        keys = jr.split(key, len(self.blocks))
+        for block, k in zip(self.blocks, keys):
+            x, state = block(x, state, key=k)
+        x = jax.vmap(self.decoder)(x)                           # (L, d_input)
+        return x, state
+
+
+class LinOSSRegressionJAX(eqx.Module):
+    """Sequence-to-scalar regression model built from ``LinOSSBlock`` layers.
+
+    Maps ``(L, d_input) → (d_output,)`` — used as the regression stage of
+    ``LinOSSCombinedJAX``.
+
+    Construct via ``eqx.nn.make_with_state``::
+
+        model, state = eqx.nn.make_with_state(LinOSSRegressionJAX)(...)
+    """
+
+    encoder  : eqx.nn.Linear
+    blocks   : list            # List[LinOSSBlock]
+    fc_layers: list            # List of (Linear, activation) pairs + final Linear
+
+    def __init__(
+        self,
+        d_input        : int,
+        d_model        : int,
+        d_output       : int,
+        n_layers       : int,
+        ssm_size       : int         = 64,
+        discretization : str         = 'IM',
+        dropout        : float       = 0.0,
+        fc_hidden      : list        = None,
+        *,
+        key            : jax.Array,
+    ):
+        if fc_hidden is None:
+            fc_hidden = [64, 32]
+        enc_key, *blk_keys, *fc_keys = jr.split(key, n_layers + len(fc_hidden) + 2)
+
+        self.encoder = eqx.nn.Linear(d_input, d_model, key=enc_key)
+        self.blocks  = [
+            LinOSSBlock(ssm_size, d_model, discretization, drop_rate=dropout, key=k)
+            for k in blk_keys
+        ]
+
+        # MLP: d_model → fc_hidden[0] → ... → d_output
+        dims    = [d_model] + list(fc_hidden) + [d_output]
+        fc_keys = jr.split(fc_keys[0], len(dims) - 1)
+        self.fc_layers = [
+            eqx.nn.Linear(dims[i], dims[i + 1], key=fc_keys[i])
+            for i in range(len(dims) - 1)
+        ]
+
+    def __call__(
+        self,
+        x     : jax.Array,   # (L, d_input)
+        state : eqx.nn.State,
+        *,
+        key   : jax.Array,
+    ):
+        """Forward pass for a single (un-batched) sequence."""
+        x = jax.vmap(self.encoder)(x)                           # (L, d_model)
+        keys = jr.split(key, len(self.blocks))
+        for block, k in zip(self.blocks, keys):
+            x, state = block(x, state, key=k)
+        x = jnp.mean(x, axis=0)                                 # (d_model,) — mean pool
+        for fc in self.fc_layers[:-1]:
+            x = jax.nn.gelu(fc(x))
+        x = self.fc_layers[-1](x)                               # (d_output,)
+        return x, state
+
+
+class LinOSSCombinedJAX(eqx.Module):
+    """Combined denoising + regression model — fully JAX / equinox.
+
+    Mirrors ``src.models.networks.LinOSSCombinedModel`` for the pure-JAX
+    training pipeline.
+
+    Architecture
+    ------------
+    1. **Denoiser** (``LinOSSSeq2SeqJAX``) — maps noisy I/Q ``(L, d_input)``
+       to a denoised sequence of the same shape.
+    2. **Regressor** (``LinOSSRegressionJAX``) — reads the denoised sequence
+       and outputs a scalar prediction vector ``(d_output,)``.
+
+    Usage (single sample, un-batched)::
+
+        model, state = eqx.nn.make_with_state(LinOSSCombinedJAX)(
+            d_input=2, d_output=2, ...)
+        x_denoised, y_pred, state = model(x_noisy, state, key=key)
+
+    For batched training use ``jax.vmap`` with ``axis_name="batch"`` so that
+    the ``eqx.nn.BatchNorm`` layers inside each block see the full batch::
+
+        vmapped = jax.vmap(
+            model, axis_name="batch",
+            in_axes=(0, None, None), out_axes=(0, 0, None)
+        )
+        x_denoised, y_pred, state = vmapped(X_noisy, state, key)
+    """
+
+    denoiser  : LinOSSSeq2SeqJAX
+    regressor : LinOSSRegressionJAX
+
+    def __init__(
+        self,
+        d_input                  : int,
+        d_output                 : int,
+        # Denoiser
+        denoiser_d_model         : int   = 128,
+        denoiser_n_layers        : int   = 6,
+        denoiser_ssm_size        : int   = 64,
+        denoiser_discretization  : str   = 'IM',
+        denoiser_dropout         : float = 0.0,
+        # Regressor
+        regressor_d_model        : int   = 128,
+        regressor_n_layers       : int   = 6,
+        regressor_ssm_size       : int   = 64,
+        regressor_discretization : str   = 'IM',
+        regressor_dropout        : float = 0.0,
+        regressor_fc_hidden      : list  = None,
+        *,
+        key                      : jax.Array,
+    ):
+        key_d, key_r = jr.split(key)
+        self.denoiser = LinOSSSeq2SeqJAX(
+            d_input        = d_input,
+            d_model        = denoiser_d_model,
+            n_layers       = denoiser_n_layers,
+            ssm_size       = denoiser_ssm_size,
+            discretization = denoiser_discretization,
+            dropout        = denoiser_dropout,
+            key            = key_d,
+        )
+        self.regressor = LinOSSRegressionJAX(
+            d_input        = d_input,
+            d_model        = regressor_d_model,
+            d_output       = d_output,
+            n_layers       = regressor_n_layers,
+            ssm_size       = regressor_ssm_size,
+            discretization = regressor_discretization,
+            dropout        = regressor_dropout,
+            fc_hidden      = regressor_fc_hidden,
+            key            = key_r,
+        )
+
+    def __call__(
+        self,
+        x_noisy : jax.Array,    # (L, d_input)
+        state   : eqx.nn.State,
+        *,
+        key     : jax.Array,
+    ):
+        """Forward pass for a single (un-batched) sequence.
+
+        Returns
+        -------
+        x_denoised : (L, d_input)
+        y_pred     : (d_output,)
+        state      : updated BatchNorm running stats
+        """
+        key_d, key_r = jr.split(key)
+        x_denoised, state = self.denoiser(x_noisy, state, key=key_d)
+        y_pred,     state = self.regressor(x_denoised, state, key=key_r)
+        return x_denoised, y_pred, state

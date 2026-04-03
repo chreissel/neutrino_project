@@ -1,0 +1,59 @@
+# Pure-JAX training configuration for LinOSS combined denoising + regression.
+# Used by: scripts/train_linoss_jax.py
+#
+# This config mirrors config_combined_linoss.yaml but targets the JAX
+# pipeline (no Lightning, no PyTorch DataLoader).
+
+# ── Data ──────────────────────────────────────────────────────────────────
+data_dir    : '/path/to/data/'   # <-- update to your HDF5 directory
+inputs      : ['output_ts_I', 'output_ts_Q']
+variables   : ['energy_eV', 'pitch_angle_deg']
+observables : ['avg_axial_frequency_Hz', 'avg_carrier_frequency_Hz', 'radius_m']
+
+cutoff         : 8192
+noise_const    : 1.0
+apply_filter   : false
+max_axial_freq : null   # set a Hz value to apply an upper frequency cut (train/val)
+max_cyc_freq   : null
+split_seed     : 42     # keeps 80/10/10 split consistent with Lightning pipeline
+
+# ── Training ──────────────────────────────────────────────────────────────
+seed         : 0
+batch_size   : 128
+max_epochs   : 80
+learning_rate: 1.0e-3
+weight_decay : 1.0e-2
+
+# ── Lambda schedules ──────────────────────────────────────────────────────
+# First focus on denoising, then ramp up the regression weight.
+lambda_denoise_schedule:
+  schedule_type: constant
+  start_value  : 1.0
+
+lambda_regress_schedule:
+  schedule_type: linear
+  start_value  : 0.0
+  end_value    : 1.0
+  # max_epochs is filled in automatically from the training loop
+
+# ── Model ─────────────────────────────────────────────────────────────────
+model:
+  # Denoiser (LinOSSSeq2SeqJAX)
+  denoiser_d_model        : 128
+  denoiser_n_layers       : 6
+  denoiser_ssm_size       : 64
+  denoiser_discretization : 'IM'   # 'IM' (dissipative) or 'IMEX' (symplectic)
+  denoiser_dropout        : 0.0
+
+  # Regressor (LinOSSRegressionJAX)
+  regressor_d_model        : 128
+  regressor_n_layers       : 6
+  regressor_ssm_size       : 64
+  regressor_discretization : 'IM'
+  regressor_dropout        : 0.0
+  regressor_fc_hidden      : [64, 32]
+
+# ── Output / logging ──────────────────────────────────────────────────────
+output_dir   : 'runs/linoss_jax/'
+wandb_project: null   # set to a project name string to enable WandB logging
+run_name     : null   # optional WandB run name
