@@ -65,8 +65,8 @@ def train_step(
     y           : jax.Array,   # (B, d_output)
     state       : eqx.nn.State,
     key         : jax.Array,
-    lambda_d    : float,
-    lambda_r    : float,
+    lambda_d    : jax.Array,   # scalar — pass as jnp.array to avoid recompilation
+    lambda_r    : jax.Array,
 ):
     """One gradient step.  Returns (diff_model, opt_state, state, loss_d, loss_r)."""
 
@@ -144,13 +144,20 @@ def _make_schedule(cfg: Dict) -> optax.Schedule:
 def _save_checkpoint(path: str, diff_model, opt_state, state, epoch: int, val_loss: float):
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     eqx.tree_serialise_leaves(path + '.eqx', diff_model)
+    eqx.tree_serialise_leaves(path + '_state.eqx', state)
+    eqx.tree_serialise_leaves(path + '_opt.eqx', opt_state)
     meta = {'epoch': epoch, 'val_loss': float(val_loss)}
     with open(path + '.json', 'w') as f:
         json.dump(meta, f)
 
 
-def _load_checkpoint(path: str, model_template):
-    return eqx.tree_deserialise_leaves(path + '.eqx', model_template)
+def _load_checkpoint(path: str, diff_model_template, state_template, opt_state_template):
+    diff_model = eqx.tree_deserialise_leaves(path + '.eqx', diff_model_template)
+    state      = eqx.tree_deserialise_leaves(path + '_state.eqx', state_template)
+    opt_state  = eqx.tree_deserialise_leaves(path + '_opt.eqx', opt_state_template)
+    with open(path + '.json') as f:
+        meta = json.load(f)
+    return diff_model, state, opt_state, meta
 
 
 # ---------------------------------------------------------------------------
@@ -238,16 +245,15 @@ def train(cfg: Dict):
     best_val  = float('inf')
 
     # ── Training loop ────────────────────────────────────────────────────
-    steps_per_epoch = max(1, len(dm.train) // batch_size)
     key, data_key = jr.split(key)
 
     for epoch in range(max_epochs):
-        lambda_d = float(d_schedule(epoch))
-        lambda_r = float(r_schedule(epoch))
+        # Convert to JAX scalars so train_step is compiled once and reused
+        lambda_d = jnp.array(float(d_schedule(epoch)))
+        lambda_r = jnp.array(float(r_schedule(epoch)))
 
         # Training
         train_losses_d, train_losses_r = [], []
-        key, epoch_key = jr.split(key)
         key, data_key  = jr.split(data_key)
 
         for X_noisy, X_clean, y, _ in dm.train.loop_epoch(batch_size, data_key, drop_last=True):
@@ -281,7 +287,7 @@ def train(cfg: Dict):
             f"Epoch {epoch + 1:>4}/{max_epochs}  "
             f"train loss={train_total:.4f} (d={train_loss_d:.4f} r={train_loss_r:.4f})  "
             f"val loss={val_total:.4f} (d={val_loss_d:.4f} r={val_loss_r:.4f})  "
-            f"λ_d={lambda_d:.3f} λ_r={lambda_r:.3f}",
+            f"λ_d={float(lambda_d):.3f} λ_r={float(lambda_r):.3f}",
             flush=True,
         )
 
@@ -294,8 +300,8 @@ def train(cfg: Dict):
                 'val/loss'      : val_total,
                 'val/loss_d'    : val_loss_d,
                 'val/loss_r'    : val_loss_r,
-                'lambda_denoise': lambda_d,
-                'lambda_regress': lambda_r,
+                'lambda_denoise': float(lambda_d),
+                'lambda_regress': float(lambda_r),
             })
 
         # Checkpointing

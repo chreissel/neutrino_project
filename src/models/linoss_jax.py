@@ -409,7 +409,11 @@ class LinOSSRegressionJAX(eqx.Module):
     ):
         if fc_hidden is None:
             fc_hidden = [64, 32]
-        enc_key, *blk_keys, *fc_keys = jr.split(key, n_layers + len(fc_hidden) + 2)
+        # Split into: 1 enc key + n_layers block keys + 1 fc seed key
+        all_keys = jr.split(key, n_layers + 2)
+        enc_key  = all_keys[0]
+        blk_keys = all_keys[1 : n_layers + 1]
+        fc_seed  = all_keys[n_layers + 1]
 
         self.encoder = eqx.nn.Linear(d_input, d_model, key=enc_key)
         self.blocks  = [
@@ -419,7 +423,7 @@ class LinOSSRegressionJAX(eqx.Module):
 
         # MLP: d_model → fc_hidden[0] → ... → d_output
         dims    = [d_model] + list(fc_hidden) + [d_output]
-        fc_keys = jr.split(fc_keys[0], len(dims) - 1)
+        fc_keys = jr.split(fc_seed, len(dims) - 1)
         self.fc_layers = [
             eqx.nn.Linear(dims[i], dims[i + 1], key=fc_keys[i])
             for i in range(len(dims) - 1)

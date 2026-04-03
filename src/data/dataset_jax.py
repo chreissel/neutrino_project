@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 import h5py
 import jax
@@ -53,25 +53,6 @@ def _compute_norm_stats(
             M2    += delta * (row - mean)
 
     return mean.astype(np.float32), np.sqrt(M2 / count).astype(np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Frequency metadata helpers (mirrors LitCombinedDataModule._filter)
-# ---------------------------------------------------------------------------
-
-def _collect_freq_metadata(
-    paths: List[str],
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    axial_parts, cyc_parts = [], []
-    for path in paths:
-        with h5py.File(path, 'r') as f:
-            if 'avg_axial_frequency_Hz' in f:
-                axial_parts.append(f['avg_axial_frequency_Hz'][:])
-            if 'avg_carrier_frequency_Hz' in f:
-                cyc_parts.append(f['avg_carrier_frequency_Hz'][:])
-    axial = np.concatenate(axial_parts) if axial_parts else None
-    cyc   = np.concatenate(cyc_parts)   if cyc_parts   else None
-    return axial, cyc
 
 
 # ---------------------------------------------------------------------------
