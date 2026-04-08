@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/denoising_v1/'
+  default_root_dir: 'runs/denoising_SpectralLoss/'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -28,12 +28,13 @@ data:
     cutoff: 8192
     noise_const: 1.0
     apply_filter: false
+    norm: false
     use_curriculum_learning: false
 
 model:
   class_path: src.models.model.LitS4DenoisingModel
   init_args:
-    loss: 'MSELoss'
+    loss: 'MixtureMSESpectralLoss'
     learning_rate: 0.5e-4
     lr_schedule_type: reduce_on_plateau
     gamma: 0.25
