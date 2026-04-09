@@ -265,6 +265,20 @@ class LitS4CombinedModel(BaseLightningModule):
 
     Regression loss options (``loss``) are the same as :class:`BaseLightningModule`,
     including ``'GaussianNLLLoss'``.
+
+    Frozen denoiser
+    ~~~~~~~~~~~~~~~
+    Set ``freeze_denoiser=True`` to freeze the denoiser weights and only train
+    the regressor.  Combine with ``pretrained_ckpt_path`` (on the encoder) or
+    ``denoiser_ckpt_path`` to load pre-trained denoiser weights first::
+
+        freeze_denoiser: true
+        encoder:
+          init_args:
+            pretrained_ckpt_path: 'runs/combined_run/checkpoints/best.ckpt'
+
+    The denoiser is kept in eval mode throughout training so that dropout
+    layers remain inactive.
     """
 
     def __init__(self,
@@ -277,10 +291,17 @@ class LitS4CombinedModel(BaseLightningModule):
                  denoising_weights=None,
                  denoising_huber_delta: float = 1.0,
                  denoising_spectral_alpha: float = 0.5,
+                 freeze_denoiser: bool = False,
                  **kwargs):
         super().__init__(trainer_max_epochs=trainer_max_epochs, **kwargs)
         self.lambda_denoise = lambda_denoise
         self.lambda_regress = lambda_regress
+        self.freeze_denoiser = freeze_denoiser
+
+        if self.freeze_denoiser:
+            self.encoder.denoiser.eval()
+            for param in self.encoder.denoiser.parameters():
+                param.requires_grad = False
 
         if denoising_loss == 'MSELoss':
             self.denoising_criterion = nn.MSELoss()
@@ -308,6 +329,13 @@ class LitS4CombinedModel(BaseLightningModule):
         self.regress_lambda_scheduler = _make_scheduler(lambda_regress_schedule, lambda_regress)
 
         self.save_hyperparameters()
+
+    def train(self, mode=True):
+        super().train(mode)
+        # Keep the denoiser in eval mode so dropout stays off
+        if self.freeze_denoiser:
+            self.encoder.denoiser.eval()
+        return self
 
     def on_train_epoch_start(self):
         # Update lambdas from their schedules, then call parent for curriculum noise
