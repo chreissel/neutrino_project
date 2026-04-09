@@ -52,3 +52,5 @@ model:
         prenorm: False
         fc_hidden: []
         gradient_checkpointing: false
+        pooling: 'mean'           # 'mean' or 'attention'
+        pooling_heads: 1          # number of attention heads (only used when pooling: 'attention')

@@ -118,6 +118,8 @@ model:
         regressor_dropout: 0.0
         regressor_prenorm: false
         regressor_fc_hidden: [64, 32]
+        regressor_pooling: 'mean'           # 'mean' or 'attention'
+        regressor_pooling_heads: 1          # number of attention heads (only used when pooling: 'attention')
         # Optional: warm-start from pre-trained checkpoints
         denoiser_ckpt_path: null
         regressor_ckpt_path: null

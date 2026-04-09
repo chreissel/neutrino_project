@@ -142,9 +142,33 @@ class MLP(nn.Module):
         return self.network(x)
 
 
+class AttentionPooling(nn.Module):
+    """Learnable attention pooling over the sequence dimension.
+
+    A single learned query vector attends to all timesteps via scaled
+    dot-product attention, allowing the model to focus on the most
+    informative parts of the sequence instead of treating every timestep
+    equally (as mean pooling does).
+
+    Input:  (B, L, D)
+    Output: (B, D)
+    """
+
+    def __init__(self, d_model, num_heads=1):
+        super().__init__()
+        self.query = nn.Parameter(torch.randn(1, 1, d_model))
+        self.attn = nn.MultiheadAttention(d_model, num_heads=num_heads, batch_first=True)
+
+    def forward(self, x):
+        # x: (B, L, d_model)
+        query = self.query.expand(x.size(0), -1, -1)  # (B, 1, d_model)
+        out, _ = self.attn(query, x, x)                # (B, 1, d_model)
+        return out.squeeze(1)                           # (B, d_model)
+
+
 dropout_fn = nn.Dropout2d
 class S4DModel(nn.Module):
-    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32], gradient_checkpointing=False):
+    def __init__(self, d_input, d_output, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[128, 64, 32], gradient_checkpointing=False, pooling='mean', pooling_heads=1):
         super().__init__()
 
         self.d_output = d_output
@@ -162,6 +186,14 @@ class S4DModel(nn.Module):
             )
             self.norms.append(nn.LayerNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
+
+        # Pooling over the sequence dimension
+        self.pooling_type = pooling
+        if pooling == 'attention':
+            self.pool = AttentionPooling(d_model, num_heads=pooling_heads)
+        elif pooling != 'mean':
+            raise ValueError(f"Unknown pooling type '{pooling}'. Choose 'mean' or 'attention'.")
+
         # Linear decoder
         #self.decoder = nn.Linear(d_model, d_output)
         self.decoder = MLP(d_model, fc_hidden, d_output)
@@ -191,14 +223,17 @@ class S4DModel(nn.Module):
             if not self.prenorm:
                 x = norm(x.transpose(-1, -2)).transpose(-1, -2)
         x = x.transpose(-1, -2)
-        # Pooling: average pooling over the sequence length
-        x = x.mean(dim=1)  # (B, d_model)
+        # Pooling over the sequence dimension
+        if self.pooling_type == 'attention':
+            x = self.pool(x)       # (B, d_model)
+        else:
+            x = x.mean(dim=1)      # (B, d_model)
         # Decode the outputs
         x = self.decoder(x)  # (B, d_model) -> (B, d_output)
         return x
 
 class S4DFeatureExtractor(nn.Module):
-    def __init__(self, d_input, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[64, 32]):
+    def __init__(self, d_input, d_model=256, n_layers=4, dropout=0.2, prenorm=False, fc_hidden=[64, 32], pooling='mean', pooling_heads=1):
         super().__init__()
         # Output dimension is the same as last feature vector for combination
         self.d_output = fc_hidden[-1] if fc_hidden else d_model
@@ -214,8 +249,15 @@ class S4DFeatureExtractor(nn.Module):
                 S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001, 0.01))
             )
             self.norms.append(nn.LayerNorm(d_model))
-            self.dropouts.append(DropoutNd(dropout)) 
-            
+            self.dropouts.append(DropoutNd(dropout))
+
+        # Pooling over the sequence dimension
+        self.pooling_type = pooling
+        if pooling == 'attention':
+            self.pool = AttentionPooling(d_model, num_heads=pooling_heads)
+        elif pooling != 'mean':
+            raise ValueError(f"Unknown pooling type '{pooling}'. Choose 'mean' or 'attention'.")
+
         self.decoder = MLP(d_model, fc_hidden, self.d_output)
 
     def forward(self, x):
@@ -238,8 +280,11 @@ class S4DFeatureExtractor(nn.Module):
                 # Postnorm
                 x = norm(x.transpose(-1, -2)).transpose(-1, -2)
         x = x.transpose(-1, -2)
-        # Pooling: average pooling over the sequence length
-        x = x.mean(dim=1)
+        # Pooling over the sequence dimension
+        if self.pooling_type == 'attention':
+            x = self.pool(x)       # (B, d_model)
+        else:
+            x = x.mean(dim=1)      # (B, d_model)
         # Decode the outputs
         x = self.decoder(x)  # (B, d_model) -> (B, d_output)
         return x
@@ -468,6 +513,8 @@ class S4DCombinedModel(nn.Module):
                  regressor_prenorm=False,
                  regressor_fc_hidden=[64, 32],
                  regressor_gradient_checkpointing=False,
+                 regressor_pooling='mean',
+                 regressor_pooling_heads=1,
                  denoiser_ckpt_path=None,
                  regressor_ckpt_path=None):
         super().__init__()
@@ -491,6 +538,8 @@ class S4DCombinedModel(nn.Module):
             prenorm=regressor_prenorm,
             fc_hidden=regressor_fc_hidden,
             gradient_checkpointing=regressor_gradient_checkpointing,
+            pooling=regressor_pooling,
+            pooling_heads=regressor_pooling_heads,
         )
 
         if denoiser_ckpt_path is not None:
