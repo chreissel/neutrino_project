@@ -1,5 +1,6 @@
 from scipy.optimize import curve_fit
 from scipy.stats import norm
+from scipy.ndimage import gaussian_filter1d
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
@@ -23,22 +24,31 @@ def gaussian(x, amplitude, mean, stddev):
         return amplitude * np.exp(-((x - mean) / stddev)**2 / 2)
 
 def compute_fwhm(values, bins):
+    # Smooth the histogram before peak finding so that bin-level Poisson noise
+    # doesn't produce a spuriously high "peak" (which shrinks the half-max
+    # threshold and collapses the FWHM).
     hist, edges = np.histogram(values, bins=bins, density=True)
     centers = 0.5 * (edges[:-1] + edges[1:])
-    peak = np.max(hist)
+
+    smooth_sigma = max(1.0, len(hist) / 100.0)
+    hist_s = gaussian_filter1d(hist, smooth_sigma)
+
+    peak = np.max(hist_s)
     half_max = peak / 2.0
 
-    above = hist >= half_max
+    above = hist_s >= half_max
     indices = np.where(above)[0]
     if len(indices) < 2:
-        return np.nan  # not well-defined
+        return np.nan, np.nan, np.nan
 
     left_idx = indices[0]
     right_idx = indices[-1]
 
     def interp_x(i1, i2):
         x1, x2 = centers[i1], centers[i2]
-        y1, y2 = hist[i1], hist[i2]
+        y1, y2 = hist_s[i1], hist_s[i2]
+        if y2 == y1:
+            return x1
         return x1 + (half_max - y1) * (x2 - x1) / (y2 - y1)
 
     if left_idx > 0:
@@ -46,12 +56,12 @@ def compute_fwhm(values, bins):
     else:
         x_left = centers[left_idx]
 
-    if right_idx < len(hist) - 1:
+    if right_idx < len(hist_s) - 1:
         x_right = interp_x(right_idx, right_idx + 1)
     else:
         x_right = centers[right_idx]
 
-    return x_right - x_left
+    return x_right - x_left, x_left, x_right
 
 def get_label_unit(var):
     # Generate useful values for plotting
@@ -198,9 +208,9 @@ def make_res(variables, true, pred, fit_gaussian=True):
         bincenters = (bins_out[:-1] + bins_out[1:]) / 2
 
         # Always compute and display FWHM
-        fwhm = compute_fwhm(diff, bins)
-        ax[0, vind].axvline(np.mean(diff) - fwhm/2, color='b', ls=':', lw=1)
-        ax[0, vind].axvline(np.mean(diff) + fwhm/2, color='b', ls=':', lw=1, label='FWHM={:.4f} {}'.format(fwhm, diff_unit))
+        fwhm, x_left, x_right = compute_fwhm(diff, bins)
+        ax[0, vind].axvline(x_left, color='b', ls=':', lw=1)
+        ax[0, vind].axvline(x_right, color='b', ls=':', lw=1, label='FWHM={:.4f} {}'.format(fwhm, diff_unit))
 
         if fit_gaussian:
             try:
@@ -268,7 +278,7 @@ def make_energy_res(variables, observables, true, pred, meta, fit_gaussian=True)
                 stds.append(np.nan)
                 lens.append(np.nan)
                 continue
-            fwhm = compute_fwhm(energy_diff, 100)
+            fwhm, _, _ = compute_fwhm(energy_diff, 100)
             if fit_gaussian:
                 hist, bins, _ = ax[0, vind].hist(energy_diff, bins=100)
                 ax[0, vind].clear()
