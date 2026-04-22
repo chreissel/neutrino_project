@@ -207,20 +207,34 @@ def make_res(variables, true, pred, fit_gaussian=True):
         hist, bins_out, _ = ax[0, vind].hist(diff, bins=bins, weights=np.ones(len(true_var))*1/float(len(true_var)))
         bincenters = (bins_out[:-1] + bins_out[1:]) / 2
 
-        # Always compute and display FWHM
-        fwhm, x_left, x_right = compute_fwhm(diff, bins)
-        ax[0, vind].axvline(x_left, color='b', ls=':', lw=1)
-        ax[0, vind].axvline(x_right, color='b', ls=':', lw=1, label='FWHM={:.4f} {}'.format(fwhm, diff_unit))
-
+        # Try a Gaussian fit first; when it succeeds we report the FWHM of the
+        # fitted Gaussian (= 2*sqrt(2*ln 2) * sigma), which characterises the
+        # resolution of the resolved core. Only fall back to the histogram-based
+        # estimator when no fit is requested or the fit fails.
+        fit_succeeded = False
         if fit_gaussian:
             try:
                 popt, pcov = curve_fit(gaussian, bincenters, hist, p0=[max(hist), np.mean(diff), np.std(diff)])
                 amplitude_fit, mean_fit, stddev_fit = popt
-                x_fit = np.linspace(min(bins_out), max(bins_out), 1000)
-                ax[0, vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
-                ax[0, vind].set_xlim(-5*stddev_fit, 5*stddev_fit)
+                stddev_fit = abs(stddev_fit)
+                fit_succeeded = True
             except Exception:
                 pass
+
+        if fit_succeeded:
+            fwhm = 2.0 * np.sqrt(2.0 * np.log(2.0)) * stddev_fit
+            x_left = mean_fit - fwhm / 2.0
+            x_right = mean_fit + fwhm / 2.0
+        else:
+            fwhm, x_left, x_right = compute_fwhm(diff, bins)
+
+        ax[0, vind].axvline(x_left, color='b', ls=':', lw=1)
+        ax[0, vind].axvline(x_right, color='b', ls=':', lw=1, label='FWHM={:.4f} {}'.format(fwhm, diff_unit))
+
+        if fit_succeeded:
+            x_fit = np.linspace(min(bins_out), max(bins_out), 1000)
+            ax[0, vind].plot(x_fit, gaussian(x_fit, *popt), 'r-', label='Fit: mu={:.4f}, std={:.4f}'.format(mean_fit, stddev_fit))
+            ax[0, vind].set_xlim(-5*stddev_fit, 5*stddev_fit)
 
         ax[0, vind].set_xlabel('residual '+var_label+ ' '+'['+diff_unit+']')
         ax[0, vind].set_ylabel('A.U.')
