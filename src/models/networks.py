@@ -497,20 +497,28 @@ class S4DCombinedModel(nn.Module):
         if pretrained_ckpt_path is not None:
             self._load_pretrained(pretrained_ckpt_path)
         if denoiser_ckpt_path is not None:
-            self._load_weights(self.denoiser, denoiser_ckpt_path, prefix='encoder.')
+            # Accept either a standalone denoiser checkpoint (keys start with
+            # ``encoder.``) or a combined-model checkpoint (keys start with
+            # ``encoder.denoiser.``).  The combined prefix is tried first.
+            self._load_weights(self.denoiser, denoiser_ckpt_path,
+                               prefixes=('encoder.denoiser.', 'encoder.'))
         if regressor_ckpt_path is not None:
-            self._load_weights(self.regressor, regressor_ckpt_path, prefix='encoder.')
+            self._load_weights(self.regressor, regressor_ckpt_path,
+                               prefixes=('encoder.regressor.', 'encoder.'))
 
     @staticmethod
-    def _load_weights(module, ckpt_path, prefix='encoder.'):
+    def _load_weights(module, ckpt_path, prefixes=('encoder.',)):
         ckpt = torch.load(ckpt_path, map_location='cpu')
         state_dict = ckpt.get('state_dict', ckpt)
-        sub_state = {
-            k[len(prefix):]: v
-            for k, v in state_dict.items()
-            if k.startswith(prefix)
-        }
-        missing, unexpected = module.load_state_dict(sub_state, strict=False)
+        for prefix in prefixes:
+            sub_state = {
+                k[len(prefix):]: v
+                for k, v in state_dict.items()
+                if k.startswith(prefix)
+            }
+            if sub_state:
+                module.load_state_dict(sub_state, strict=False)
+                return
 
     def _load_pretrained(self, ckpt_path):
         """Load a full pretrained combined-model checkpoint.
