@@ -469,7 +469,8 @@ class S4DCombinedModel(nn.Module):
                  regressor_fc_hidden=[64, 32],
                  regressor_gradient_checkpointing=False,
                  denoiser_ckpt_path=None,
-                 regressor_ckpt_path=None):
+                 regressor_ckpt_path=None,
+                 pretrained_ckpt_path=None):
         super().__init__()
 
         self.denoiser = S4DSeq2SeqModel(
@@ -493,6 +494,8 @@ class S4DCombinedModel(nn.Module):
             gradient_checkpointing=regressor_gradient_checkpointing,
         )
 
+        if pretrained_ckpt_path is not None:
+            self._load_pretrained(pretrained_ckpt_path)
         if denoiser_ckpt_path is not None:
             self._load_weights(self.denoiser, denoiser_ckpt_path, prefix='encoder.')
         if regressor_ckpt_path is not None:
@@ -508,6 +511,22 @@ class S4DCombinedModel(nn.Module):
             if k.startswith(prefix)
         }
         missing, unexpected = module.load_state_dict(sub_state, strict=False)
+
+    def _load_pretrained(self, ckpt_path):
+        """Load a full pretrained combined-model checkpoint.
+
+        Expects a Lightning checkpoint whose ``state_dict`` keys start with
+        ``encoder.denoiser.*`` and ``encoder.regressor.*``.
+        """
+        ckpt = torch.load(ckpt_path, map_location='cpu')
+        state_dict = ckpt.get('state_dict', ckpt)
+        prefix = 'encoder.'
+        sub_state = {
+            k[len(prefix):]: v
+            for k, v in state_dict.items()
+            if k.startswith(prefix)
+        }
+        missing, unexpected = self.load_state_dict(sub_state, strict=False)
 
     def forward(self, x):
         """
