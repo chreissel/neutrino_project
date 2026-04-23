@@ -1,7 +1,10 @@
 import os
 import sys
 import shutil
+import torch
 from lightning.pytorch.cli import LightningCLI
+
+torch.set_float32_matmul_precision('medium')
 
 class CustomCLI(LightningCLI):
     def before_instantiate_classes(self):
