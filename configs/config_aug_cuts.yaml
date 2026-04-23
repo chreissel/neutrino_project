@@ -1,6 +1,6 @@
 trainer:
   accelerator: auto
-  default_root_dir: 'runs/longtracks_163kpoints'
+  default_root_dir: 'runs/longtracks_8kpoints_cuts_repeat'
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -16,7 +16,7 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
   log_every_n_steps: 1
-  max_epochs: 80
+  max_epochs: 25
   accumulate_grad_batches: 8
 
 data:
@@ -28,9 +28,12 @@ data:
     batch_size: 16
     pin_memory: True
     num_workers: 4
-    data_dir: '/home/lfd34/project/project8/ssm/neutrino_project/data_preprocessing/shards_20bins/'
-    cutoff: 163840
+    data_dir: '/nfs/roberts/project/pi_kmh66/lfd34/project/project8/ssm/neutrino_project/data_preprocessing/shards_20bins'
+    cutoff: 8192
     noise_const: 1.0
+    multiplier: 5
+    max_axial_freq: 7.5e6
+    max_cyc_freq: 2.591e10
 
 model:
   class_path: src.models.model.LitS4Model
