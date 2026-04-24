@@ -30,15 +30,20 @@ def _softplus(x):
 def split_gaussian_nll_pred(pred, n_vars):
     # If pred has last-dim 2*n_vars it's interpreted as a GaussianNLL output:
     # the first n_vars entries are the mean predictions and the remaining
-    # n_vars entries are the pre-softplus variance parameters.  Returns
-    # (means, stds) with softplus applied to recover a positive variance; if
-    # pred is not a GaussianNLL output, returns (pred, None).
+    # n_vars entries are the per-track standard deviations (positive, in the
+    # same physical units as the mean).  Returns (means, stds); if pred is
+    # not a GaussianNLL output, returns (pred, None).
+    #
+    # The caller is responsible for undoing the training-time softplus and
+    # z-score normalization before calling this function, i.e. the second
+    # half of pred must equal sqrt(softplus(raw_var)) * stds in physical
+    # units.
     pred = np.asarray(pred)
     if pred.shape[-1] != 2 * n_vars:
         return pred, None
     means = pred[..., :n_vars]
-    var = _softplus(pred[..., n_vars:])
-    return means, np.sqrt(var)
+    stds = pred[..., n_vars:]
+    return means, stds
 
 def compute_fwhm(values, bins):
     # Smooth the histogram before peak finding so that bin-level Poisson noise
@@ -388,6 +393,13 @@ def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
     # regression variable as a function of every parameter, in bins.
     # Intended for models trained with GaussianNLLLoss.
     #
+    # For each (variable, parameter) pair the point in each bin is the RMS
+    # of the per-track predicted sigma, sqrt(mean(sigma**2)).  Under a
+    # well-calibrated model this equals the spread of residuals in the bin,
+    # i.e. the quantity that make_res tries to estimate from the Gaussian
+    # fit of the residual histogram.  Error bars are the in-bin spread of
+    # per-track sigmas (1 std of the sigma distribution).
+    #
     # INPUTS
     #    variables: The regression target variable names
     #    observables: Additional observable variable names
@@ -397,9 +409,7 @@ def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
     #
     # OUTPUTS
     #    fig: figure with one row per regression variable and one column per
-    #         parameter (variables + observables).  Points are the mean
-    #         predicted sigma within each bin; error bars are the spread of
-    #         the predicted sigma within the bin.
+    #         parameter (variables + observables).
 
     all_var_names = list(variables) + list(observables)
     all_true = np.zeros((len(true), len(all_var_names)))
@@ -425,18 +435,20 @@ def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
             idxs_all = [np.where((param_true >= param_bins[i]) & (param_true <= param_bins[i+1]))[0]
                         for i in range(len(param_bins) - 1)]
 
-            means, spreads = [], []
+            rms_sigma, sigma_spread = [], []
             for idxs in idxs_all:
                 if idxs.size < 1:
-                    means.append(np.nan)
-                    spreads.append(np.nan)
+                    rms_sigma.append(np.nan)
+                    sigma_spread.append(np.nan)
                 else:
-                    means.append(np.mean(pred_sigma[idxs]))
-                    spreads.append(np.std(pred_sigma[idxs]))
+                    s_bin = pred_sigma[idxs]
+                    rms_sigma.append(np.sqrt(np.mean(s_bin**2)))
+                    sigma_spread.append(np.std(s_bin))
 
-            ax[vind, pind].errorbar(bincenters, means, spreads, color='k', marker='o', ls='')
+            ax[vind, pind].errorbar(bincenters, rms_sigma, sigma_spread,
+                                    color='k', marker='o', ls='')
             ax[vind, pind].set_xlabel('true ' + p_label + ' [' + p_unit + ']')
-            ax[vind, pind].set_ylabel('pred sigma ' + var_label + ' [' + diff_unit + ']')
+            ax[vind, pind].set_ylabel('RMS pred sigma ' + var_label + ' [' + diff_unit + ']')
             ax[vind, pind].set_xlim(np.min(param_bins), np.max(param_bins))
 
     plt.tight_layout()
