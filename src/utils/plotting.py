@@ -393,6 +393,13 @@ def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
     # regression variable as a function of every parameter, in bins.
     # Intended for models trained with GaussianNLLLoss.
     #
+    # For each (variable, parameter) pair the point in each bin is the RMS
+    # of the per-track predicted sigma, sqrt(mean(sigma**2)).  Under a
+    # well-calibrated model this equals the spread of residuals in the bin,
+    # i.e. the quantity that make_res tries to estimate from the Gaussian
+    # fit of the residual histogram.  Error bars are the in-bin spread of
+    # per-track sigmas (1 std of the sigma distribution).
+    #
     # INPUTS
     #    variables: The regression target variable names
     #    observables: Additional observable variable names
@@ -402,9 +409,7 @@ def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
     #
     # OUTPUTS
     #    fig: figure with one row per regression variable and one column per
-    #         parameter (variables + observables).  Points are the mean
-    #         predicted sigma within each bin; error bars are the spread of
-    #         the predicted sigma within the bin.
+    #         parameter (variables + observables).
 
     all_var_names = list(variables) + list(observables)
     all_true = np.zeros((len(true), len(all_var_names)))
@@ -430,18 +435,20 @@ def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
             idxs_all = [np.where((param_true >= param_bins[i]) & (param_true <= param_bins[i+1]))[0]
                         for i in range(len(param_bins) - 1)]
 
-            means, spreads = [], []
+            rms_sigma, sigma_spread = [], []
             for idxs in idxs_all:
                 if idxs.size < 1:
-                    means.append(np.nan)
-                    spreads.append(np.nan)
+                    rms_sigma.append(np.nan)
+                    sigma_spread.append(np.nan)
                 else:
-                    means.append(np.mean(pred_sigma[idxs]))
-                    spreads.append(np.std(pred_sigma[idxs]))
+                    s_bin = pred_sigma[idxs]
+                    rms_sigma.append(np.sqrt(np.mean(s_bin**2)))
+                    sigma_spread.append(np.std(s_bin))
 
-            ax[vind, pind].errorbar(bincenters, means, spreads, color='k', marker='o', ls='')
+            ax[vind, pind].errorbar(bincenters, rms_sigma, sigma_spread,
+                                    color='k', marker='o', ls='')
             ax[vind, pind].set_xlabel('true ' + p_label + ' [' + p_unit + ']')
-            ax[vind, pind].set_ylabel('pred sigma ' + var_label + ' [' + diff_unit + ']')
+            ax[vind, pind].set_ylabel('RMS pred sigma ' + var_label + ' [' + diff_unit + ']')
             ax[vind, pind].set_xlim(np.min(param_bins), np.max(param_bins))
 
     plt.tight_layout()
