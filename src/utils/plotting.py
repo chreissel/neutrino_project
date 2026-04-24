@@ -30,14 +30,18 @@ def _softplus(x):
 def split_gaussian_nll_pred(pred, n_vars):
     # If pred has last-dim 2*n_vars it's interpreted as a GaussianNLL output:
     # the first n_vars entries are the mean predictions and the remaining
-    # n_vars entries are the pre-softplus variance parameters.  Returns
-    # (means, stds) with softplus applied to recover a positive variance; if
-    # pred is not a GaussianNLL output, returns (pred, None).
+    # n_vars entries are the per-track variances (positive, in the same
+    # physical units as mean**2).  Returns (means, stds); if pred is not a
+    # GaussianNLL output, returns (pred, None).
+    #
+    # The caller is responsible for undoing the training-time softplus and
+    # z-score normalization before calling this function, i.e. the second
+    # half of pred must equal softplus(raw_var) * stds**2 in physical units.
     pred = np.asarray(pred)
     if pred.shape[-1] != 2 * n_vars:
         return pred, None
     means = pred[..., :n_vars]
-    var = _softplus(pred[..., n_vars:])
+    var = pred[..., n_vars:]
     return means, np.sqrt(var)
 
 def compute_fwhm(values, bins):
