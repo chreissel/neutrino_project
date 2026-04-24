@@ -23,6 +23,23 @@ plt.rc('figure', titlesize=BIG_SIZE)  # fontsize of the figure title
 def gaussian(x, amplitude, mean, stddev):
         return amplitude * np.exp(-((x - mean) / stddev)**2 / 2)
 
+def _softplus(x):
+    # Numerically-stable softplus, matching torch.nn.functional.softplus
+    return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
+
+def split_gaussian_nll_pred(pred, n_vars):
+    # If pred has last-dim 2*n_vars it's interpreted as a GaussianNLL output:
+    # the first n_vars entries are the mean predictions and the remaining
+    # n_vars entries are the pre-softplus variance parameters.  Returns
+    # (means, stds) with softplus applied to recover a positive variance; if
+    # pred is not a GaussianNLL output, returns (pred, None).
+    pred = np.asarray(pred)
+    if pred.shape[-1] != 2 * n_vars:
+        return pred, None
+    means = pred[..., :n_vars]
+    var = _softplus(pred[..., n_vars:])
+    return means, np.sqrt(var)
+
 def compute_fwhm(values, bins):
     # Smooth the histogram before peak finding so that bin-level Poisson noise
     # doesn't produce a spuriously high "peak" (which shrinks the half-max
@@ -366,6 +383,66 @@ def make_all_vs_all(variables, observables, true, pred, meta):
 
     return fig
 
+def make_uncertainty_vs_params(variables, observables, true, pred_std, meta):
+    # Plot the per-track predicted uncertainty (standard deviation) for each
+    # regression variable as a function of every parameter, in bins.
+    # Intended for models trained with GaussianNLLLoss.
+    #
+    # INPUTS
+    #    variables: The regression target variable names
+    #    observables: Additional observable variable names
+    #    true: (N, n_vars) array of true target values in physical units
+    #    pred_std: (N, n_vars) array of predicted standard deviations
+    #    meta: (N, n_observables) array of observable values
+    #
+    # OUTPUTS
+    #    fig: figure with one row per regression variable and one column per
+    #         parameter (variables + observables).  Points are the mean
+    #         predicted sigma within each bin; error bars are the spread of
+    #         the predicted sigma within the bin.
+
+    all_var_names = list(variables) + list(observables)
+    all_true = np.zeros((len(true), len(all_var_names)))
+    all_true[:, :len(variables)] = true
+    all_true[:, len(variables):] = meta
+
+    n_vars = len(variables)
+    n_params = len(all_var_names)
+
+    fig, ax = plt.subplots(n_vars, n_params, figsize=(4*n_params, 4*n_vars), squeeze=False)
+
+    for vind, var in enumerate(variables):
+        var_label, _, diff_unit, _, diff_factor = get_label_unit(var)
+        pred_sigma = pred_std[:, vind] / diff_factor
+
+        for pind, param in enumerate(all_var_names):
+            p_label, p_unit, _, p_factor, _ = get_label_unit(param)
+            param_true = all_true[:, pind] / p_factor
+
+            param_bins = np.linspace(np.min(param_true), np.max(param_true), 20)
+            bincenters = 0.5 * (param_bins[:-1] + param_bins[1:])
+
+            idxs_all = [np.where((param_true >= param_bins[i]) & (param_true <= param_bins[i+1]))[0]
+                        for i in range(len(param_bins) - 1)]
+
+            means, spreads = [], []
+            for idxs in idxs_all:
+                if idxs.size < 1:
+                    means.append(np.nan)
+                    spreads.append(np.nan)
+                else:
+                    means.append(np.mean(pred_sigma[idxs]))
+                    spreads.append(np.std(pred_sigma[idxs]))
+
+            ax[vind, pind].errorbar(bincenters, means, spreads, color='k', marker='o', ls='')
+            ax[vind, pind].set_xlabel('true ' + p_label + ' [' + p_unit + ']')
+            ax[vind, pind].set_ylabel('pred sigma ' + var_label + ' [' + diff_unit + ']')
+            ax[vind, pind].set_xlim(np.min(param_bins), np.max(param_bins))
+
+    plt.tight_layout()
+    return fig
+
+
 def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs=False, fit_gaussian=True):
     print(folder)
     # Make all plots
@@ -373,20 +450,30 @@ def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs
     # INPUTS
     #    variables: The list of all variables from the original file (e.g., 'start_carrier_frequency_Hz')
     #    true: array of true values from the model
-    #    pred: array of predicted values from the model
+    #    pred: array of predicted values from the model.  Accepts either
+    #          (N, n_vars) for point predictions or (N, 2*n_vars) for
+    #          GaussianNLL outputs where the second half is the pre-softplus
+    #          variance parameter.  When a GaussianNLL shape is detected an
+    #          extra per-track uncertainty plot is produced.
     #    fit_gaussian: if True, overlay Gaussian fits on residual histograms (default: True)
     # OUTPUTS
-    #    res, bias, all_vs_all, energy_res: figures to be saved later, if desired
+    #    res, bias, all_vs_all, energy_res, [uncertainty]: figures to be saved later, if desired
+
+    pred_mean, pred_std = split_gaussian_nll_pred(pred, len(variables))
 
     dist = make_distribution(variables, observables, true, meta)
-    res = make_res(variables, true, pred, fit_gaussian=fit_gaussian)
-    bias = make_bias(variables, true, pred)
-    all_vs_all = make_all_vs_all(variables, observables, true, pred, meta)
+    res = make_res(variables, true, pred_mean, fit_gaussian=fit_gaussian)
+    bias = make_bias(variables, true, pred_mean)
+    all_vs_all = make_all_vs_all(variables, observables, true, pred_mean, meta)
     # Only make the energy resolution plot if the energy variable is present
 
     if 'energy_eV' in variables:
-        energy_res, nums = make_energy_res(variables, observables, true, pred, meta, fit_gaussian=fit_gaussian)
-    
+        energy_res, nums = make_energy_res(variables, observables, true, pred_mean, meta, fit_gaussian=fit_gaussian)
+
+    uncertainty = None
+    if pred_std is not None:
+        uncertainty = make_uncertainty_vs_params(variables, observables, true, pred_std, meta)
+
     if(savefigs):
         if(folder==[]):
             print("Please provide folder to save figures")
@@ -400,7 +487,12 @@ def make_all_plots(variables, observables, true, pred, meta, folder=[], savefigs
             if('energy_eV' in variables):
                 nums.savefig(folder+'/std_vs_num.png')
                 energy_res.savefig(folder+'/energy_res.png')
-    if 'energy_eV' in variables:
-        return dist, res, bias, all_vs_all, energy_res
+            if uncertainty is not None:
+                uncertainty.savefig(folder+'/uncertainty_vs_params.png')
 
-    return dist, res, bias, all_vs_all
+    results = [dist, res, bias, all_vs_all]
+    if 'energy_eV' in variables:
+        results.append(energy_res)
+    if uncertainty is not None:
+        results.append(uncertainty)
+    return tuple(results)
